@@ -2,7 +2,7 @@
 //   node build.mjs && node tests/ui.test.mjs [screenshotDir]
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
-import { mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync, rmSync, cpSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
@@ -10,7 +10,15 @@ import assert from 'node:assert/strict';
 const require = createRequire(import.meta.url);
 const { chromium, devices } = require('playwright');
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const site = join(root, 'dist', 'site');
+// This test checks the PHP sync route, so it uses a copy of dist/site with
+// Firebase switched off (tests/firebase.test.mjs covers Firebase).
+const site = join(root, 'dist', 'test-site-php');
+rmSync(site, { recursive: true, force: true });
+cpSync(join(root, 'dist', 'site'), site, { recursive: true });
+const built = readFileSync(join(site, 'index.html'), 'utf8');
+const noFirebase = built.replace(/firebase: (null|\{[^}]*\}),/, 'firebase: null,');
+if (!noFirebase.includes('firebase: null,')) throw new Error('firebase config line not found');
+writeFileSync(join(site, 'index.html'), noFirebase);
 const shots = process.argv[2] || join(root, 'dist', 'screens');
 mkdirSync(shots, { recursive: true });
 const PORT = 8093;

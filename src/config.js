@@ -7,8 +7,15 @@
   const SQ = root.SQ;
 
   SQ.config = {
-    // Where the sync script lives, relative to index.html.
-    // The GitHub Pages build sets this to null (no server there).
+    // Shared progress between devices through Google Cloud Firestore.
+    // Values from Firebase console -> Project settings -> Your apps (web app).
+    // These are public identifiers, not secrets: the Firestore rules in the
+    // README decide what can be read or written. null = not used.
+    firebase: null,
+
+    // Alternative for PHP hosting: where the sync script lives, relative to
+    // index.html. Used only when firebase is null. The GitHub Pages build sets
+    // this to null (no PHP there).
     syncUrl: 'api/sync.php',
   };
 
