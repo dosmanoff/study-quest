@@ -39,7 +39,10 @@
   };
 
   SQ.sound = {
-    enabled: function () { return !SQ.app || !SQ.app.state || SQ.app.state.settings.sound !== false; },
+    enabled: function () {
+      const c = SQ.ui && SQ.ui.kid ? SQ.ui.kid() : null;
+      return !c || c.settings.sound !== false;
+    },
     /** Call from a click so browsers allow audio later. */
     unlock: function () {
       const c = context();

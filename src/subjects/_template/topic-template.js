@@ -6,7 +6,7 @@
  *   2. Add a line to index.html, after the subject's other files:
  *        <script src="src/subjects/french/animals.js"></script>
  *   3. Run:  node build.mjs   and upload the dist/site folder again.
- *   4. In "For parents" -> "Темы", tick the new levels for the challenge.
+ *   4. In For parents -> Topics, tick the new levels for the challenge.
  *
  * The example below is a French vocabulary topic. It shows the two answer
  * types maths doesn't use: typed text ('text') and multiple choice ('choice').

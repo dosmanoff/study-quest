@@ -1,5 +1,6 @@
 /*
- * Study Quest — parent screens (in Russian): first setup, PIN, parent panel.
+ * Study Quest — parent screens: first setup, PIN entry (parent and child),
+ * parent panel with progress, rules, topics, family, devices, data.
  */
 (function (root) {
   'use strict';
@@ -10,32 +11,38 @@
 
   function $(id) { return doc.getElementById(id); }
   function pct(x) { return Math.round(x * 100) + '%'; }
-  const MONTHS = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+  const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   function when(ts) {
     const d = new Date(ts);
     const hm = (d.getHours() < 10 ? '0' : '') + d.getHours() + ':' + (d.getMinutes() < 10 ? '0' : '') + d.getMinutes();
-    if (E.dayKey(ts) === E.dayKey()) return 'сегодня, ' + hm;
-    if (E.dayKey(ts) === E.dayKey(Date.now() - 864e5)) return 'вчера, ' + hm;
+    if (E.dayKey(ts) === E.dayKey()) return 'Today, ' + hm;
+    if (E.dayKey(ts) === E.dayKey(Date.now() - 864e5)) return 'Yesterday, ' + hm;
     return d.getDate() + ' ' + MONTHS[d.getMonth()] + ', ' + hm;
   }
-  function plural(n, one, few, many) {
-    const m10 = n % 10, m100 = n % 100;
-    if (m10 === 1 && m100 !== 11) return one;
-    if (m10 >= 2 && m10 <= 4 && (m100 < 10 || m100 >= 20)) return few;
-    return many;
-  }
+  function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
   function validPin(p) { return /^[0-9]{4}$/.test(p); }
   function joinLink(code) {
     const l = root.location;
     return l.origin + l.pathname + '#join-' + code;
   }
   function copy(text, okMsg) {
-    const done = function () { ui.toast(okMsg || 'Скопировано'); };
+    const done = function () { ui.toast(okMsg || 'Copied'); };
     try {
-      navigator.clipboard.writeText(text).then(done, function () { ui.toast('Выделите текст и скопируйте вручную'); });
+      navigator.clipboard.writeText(text).then(done, function () { ui.toast('Select the text and copy it yourself'); });
     } catch (e) {
-      ui.toast('Выделите текст и скопируйте вручную');
+      ui.toast('Select the text and copy it yourself');
     }
+  }
+  function kids() { return SQ.family.children(app.state); }
+  function nameOf(c) { return (c && c.settings.childName) || 'Child'; }
+  function avatar(c) {
+    const i = Math.max(0, kids().indexOf(c));
+    return '<span class="avatar a' + (i % 4) + '" aria-hidden="true">' + esc(nameOf(c).charAt(0).toUpperCase()) + '</span>';
+  }
+
+  /** The child the parent is looking at in the panel. */
+  function pk() {
+    return SQ.family.child(app.state, app.parentChild) || ui.kid() || kids()[0] || null;
   }
 
   /* ---------- first setup ---------- */
@@ -45,33 +52,33 @@
     const mode = syncOn ? (args.mode || (args.join ? 'join' : 'new')) : 'new';
     const seg = syncOn
       ? '<div class="seg" role="tablist">' +
-        '<button role="tab" class="seg-btn' + (mode === 'new' ? ' on' : '') + '" aria-selected="' + (mode === 'new') + '" data-act="setup-mode" data-mode="new">Первая настройка</button>' +
-        '<button role="tab" class="seg-btn' + (mode === 'join' ? ' on' : '') + '" aria-selected="' + (mode === 'join') + '" data-act="setup-mode" data-mode="join">У меня есть код семьи</button>' +
+        '<button role="tab" class="seg-btn' + (mode === 'new' ? ' on' : '') + '" aria-selected="' + (mode === 'new') + '" data-act="setup-mode" data-mode="new">New family</button>' +
+        '<button role="tab" class="seg-btn' + (mode === 'join' ? ' on' : '') + '" aria-selected="' + (mode === 'join') + '" data-act="setup-mode" data-mode="join">I have a family code</button>' +
         '</div>'
       : '';
     const formNew =
       '<form id="setup-form" class="form" novalidate>' +
-      '<label class="field"><span>Имя ребёнка</span><input id="setup-name" maxlength="30" autocomplete="off" placeholder="Например, Sam"></label>' +
-      '<label class="field"><span>PIN родителя, 4 цифры</span><input id="setup-pin" type="password" inputmode="numeric" maxlength="4" autocomplete="new-password"></label>' +
-      '<label class="field"><span>Повторите PIN</span><input id="setup-pin2" type="password" inputmode="numeric" maxlength="4" autocomplete="new-password"></label>' +
+      '<label class="field"><span>Child’s name</span><input id="setup-name" maxlength="30" autocomplete="off" placeholder="For example, Sam"></label>' +
+      '<label class="field"><span>Parent PIN (4 digits)</span><input id="setup-pin" type="password" inputmode="numeric" maxlength="4" autocomplete="new-password"></label>' +
+      '<label class="field"><span>Repeat the PIN</span><input id="setup-pin2" type="password" inputmode="numeric" maxlength="4" autocomplete="new-password"></label>' +
       '<p class="form-err" id="setup-err" role="alert"></p>' +
-      '<button class="btn primary big" type="submit">Готово</button>' +
-      '<p class="muted small">PIN нужен, чтобы ребёнок не мог поменять правила. Темы, число вопросов и минуты игры настраиваются потом в разделе «For parents» внизу страницы.</p>' +
+      '<button class="btn primary big" type="submit">Done</button>' +
+      '<p class="muted small">The parent PIN stops children changing the rules. You can add more children, their PINs, topics and rules later under “For parents” at the bottom of the page.</p>' +
       '</form>';
     const formJoin =
       '<form id="join-form" class="form" novalidate>' +
-      '<label class="field"><span>Код семьи</span><input id="join-code" class="code-input" maxlength="14" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX-XXXX" value="' + esc(args.join || '') + '"></label>' +
+      '<label class="field"><span>Family code</span><input id="join-code" class="code-input" maxlength="14" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX-XXXX" value="' + esc(args.join || '') + '"></label>' +
       '<p class="form-err" id="join-err" role="alert"></p>' +
-      '<button class="btn primary big" type="submit">Подключить это устройство</button>' +
-      '<p class="muted small">Код есть на устройстве, где всё уже настроено: «For parents» → «Устройства». Там же есть готовая ссылка, которую можно просто открыть на этом устройстве.</p>' +
+      '<button class="btn primary big" type="submit">Connect this device</button>' +
+      '<p class="muted small">You’ll find the code on the device where everything is set up: For parents → Devices. There is also a ready-made link there that you can simply open on this device.</p>' +
       '</form>';
     ui.set(
       '<section class="panel setup">' +
-      '<p class="eyebrow">Для родителей</p>' +
-      '<h1>Настройка Study Quest</h1>' +
-      '<p class="muted">Ребёнок решает сеты примеров. Несколько идеальных сетов подряд (без единой ошибки) открывают время для компьютерных игр. Интерфейс для ребёнка на английском, как в школе; панель родителя на русском.</p>' +
+      '<p class="eyebrow">For parents</p>' +
+      '<h1>Set up Study Quest</h1>' +
+      '<p class="muted">Your child solves sets of questions. A few perfect sets in a row, with no mistakes at all, unlock time for computer games.</p>' +
       seg + (mode === 'join' ? formJoin : formNew) +
-      (!syncOn ? '<p class="notice">Сайт открыт без сервера синхронизации, поэтому прогресс будет храниться только в этом браузере. Чтобы телефон и компьютер видели общий прогресс, загрузите сайт на хостинг с PHP (см. README).</p>' : '') +
+      (!syncOn ? '<p class="notice">This copy of the site has no sync server, so progress is kept in this browser only. To share progress between a phone and a computer, put the site on hosting with PHP (see the README).</p>' : '') +
       '</section>'
     );
 
@@ -81,13 +88,14 @@
       const name = $('setup-name').value.trim();
       const pin = $('setup-pin').value.trim(), pin2 = $('setup-pin2').value.trim();
       const err = $('setup-err');
-      if (!name) { err.textContent = 'Введите имя ребёнка.'; return; }
-      if (!validPin(pin)) { err.textContent = 'PIN должен состоять из 4 цифр.'; return; }
-      if (pin !== pin2) { err.textContent = 'PIN-коды не совпадают.'; return; }
-      const st = app.state.settings;
-      st.childName = name;
-      st.pinHash = SQ.hashPin(pin);
-      ui.touchSettings();
+      if (!name) { err.textContent = 'Enter your child’s name.'; return; }
+      if (!validPin(pin)) { err.textContent = 'The PIN must be 4 digits.'; return; }
+      if (pin !== pin2) { err.textContent = 'The PINs don’t match.'; return; }
+      app.state.family.pinHash = SQ.hashPin(pin);
+      ui.touchFamily();
+      const child = SQ.storage.blankChild(name);
+      app.state.children.push(child);
+      ui.selectChild(child.id);
       SQ.storage.save(app.state);
       if (SQ.sync.enabled) {
         SQ.sync.createFamily();
@@ -97,7 +105,7 @@
       } else {
         ui.commit();
         ui.show('home');
-        ui.toast('Готово! Можно начинать.');
+        ui.toast('All set! Ready to start.');
       }
     });
 
@@ -111,16 +119,17 @@
       j.addEventListener('submit', function (e) {
         e.preventDefault();
         const err = $('join-err');
-        err.textContent = 'Проверяю код…';
+        err.textContent = 'Checking the code…';
         SQ.sync.join(inp.value).then(function (state) {
           app.state = state;
           SQ.storage.save(state);
-          ui.show(state.settings.pinHash ? 'home' : 'setup', {});
-          ui.toast('Устройство подключено');
+          ui.selectChild(null);
+          ui.enter({});
+          ui.toast('Device connected');
         }).catch(function (ex) {
-          err.textContent = ex.message === 'invalid' ? 'Код выглядит так: XXXX-XXXX-XXXX.'
-            : ex.message === 'not-found' ? 'Такой код не найден. Проверьте буквы и цифры.'
-            : 'Нет связи с сервером. Попробуйте ещё раз.';
+          err.textContent = ex.message === 'invalid' ? 'A family code looks like XXXX-XXXX-XXXX.'
+            : ex.message === 'not-found' ? 'That code wasn’t found. Check the letters and numbers.'
+            : 'Can’t reach the server. Please try again.';
         });
       });
     }
@@ -128,30 +137,39 @@
 
   actions['setup-mode'] = function (el) { ui.show('setup', { mode: el.dataset.mode }); };
 
-  /* ---------- PIN ---------- */
+  /* ---------- PIN (parent or child) ---------- */
 
   let pinBuf = '';
+  let pinArgs = {};
 
-  screens.pin = function () {
+  screens.pin = function (args) {
     pinBuf = '';
+    pinArgs = args || {};
+    const child = pinArgs.mode === 'child' ? SQ.family.child(app.state, pinArgs.childId) : null;
+    if (pinArgs.mode === 'child' && !child) return ui.show('who');
     const keys = [1, 2, 3, 4, 5, 6, 7, 8, 9].map(function (n) {
       return '<button class="key" data-act="pin-key" data-k="' + n + '">' + n + '</button>';
     }).join('');
+    const head = child
+      ? '<p class="eyebrow">' + esc(nameOf(child)) + '</p><h1>Enter your PIN</h1>'
+      : '<p class="eyebrow">For parents</p><h1>Enter the parent PIN</h1>';
+    const links = child
+      ? '<div class="pin-links"><button class="link" data-act="switch-child">' + ui.ICON.back + 'Back</button>' +
+        '<span class="muted small">Forgot it? Ask a parent.</span></div>'
+      : '<div class="pin-links"><button class="link" data-act="pin-back">' + ui.ICON.back + 'Back</button>' +
+        '<button class="link" data-act="pin-forgot">Forgot the PIN?</button></div>' +
+        '<div id="pin-forgot" class="forgot" hidden>' +
+        '<p>The PIN can’t be recovered. You can erase all data and settings on this device and set everything up again. Other synced devices are not affected.</p>' +
+        '<label class="field"><span>Type RESET to erase</span><input id="forgot-word" autocomplete="off"></label>' +
+        '<button class="btn danger" data-act="pin-reset">Erase data on this device</button></div>';
     ui.set(
-      '<section class="panel pin">' +
-      '<p class="eyebrow">For parents</p><h1>Введите PIN</h1>' +
-      '<div class="pin-dots" id="pin-dots" aria-label="Введено 0 из 4"><span></span><span></span><span></span><span></span></div>' +
+      '<section class="panel pin">' + (child ? avatar(child) : '') + head +
+      '<div class="pin-dots" id="pin-dots" aria-label="0 / 4"><span></span><span></span><span></span><span></span></div>' +
       '<p class="form-err" id="pin-err" role="alert"></p>' +
       '<div class="pinpad">' + keys +
       '<span></span><button class="key" data-act="pin-key" data-k="0">0</button>' +
-      '<button class="key fn" data-act="pin-key" data-k="back" aria-label="Стереть">' + ui.ICON.del + '</button></div>' +
-      '<div class="pin-links"><button class="link" data-act="home">' + ui.ICON.back + 'Back</button>' +
-      '<button class="link" data-act="pin-forgot">Забыли PIN?</button></div>' +
-      '<div id="pin-forgot" class="forgot" hidden>' +
-      '<p>PIN нельзя восстановить. Можно стереть все данные и настройки на этом устройстве и настроить всё заново. Если включена синхронизация, другие устройства это не затронет.</p>' +
-      '<label class="field"><span>Чтобы стереть, напишите СБРОС</span><input id="forgot-word" autocomplete="off"></label>' +
-      '<button class="btn danger" data-act="pin-reset">Стереть данные на этом устройстве</button></div>' +
-      '</section>'
+      '<button class="key fn" data-act="pin-key" data-k="back" aria-label="Delete">' + ui.ICON.del + '</button></div>' +
+      links + '</section>'
     );
   };
 
@@ -159,7 +177,7 @@
     const dots = $('pin-dots');
     if (!dots) return;
     Array.prototype.forEach.call(dots.children, function (d, i) { d.className = i < pinBuf.length ? 'on' : ''; });
-    dots.setAttribute('aria-label', 'Введено ' + pinBuf.length + ' из 4');
+    dots.setAttribute('aria-label', pinBuf.length + ' / 4');
   }
 
   function pinKey(k) {
@@ -167,32 +185,41 @@
     else if (pinBuf.length < 4) pinBuf += k;
     pinDots();
     $('pin-err').textContent = '';
-    if (pinBuf.length === 4) {
-      if (SQ.hashPin(pinBuf) === app.state.settings.pinHash) {
+    if (pinBuf.length < 4) return;
+    const child = pinArgs.mode === 'child' ? SQ.family.child(app.state, pinArgs.childId) : null;
+    const expected = child ? child.settings.childPinHash : app.state.family.pinHash;
+    if (SQ.hashPin(pinBuf) === expected) {
+      if (child) {
+        ui.selectChild(child.id);
+        ui.show('home');
+      } else {
         app.parentAt = Date.now();
         ui.show('parent', { tab: 'progress' });
-      } else {
-        pinBuf = '';
-        const dots = $('pin-dots');
-        dots.classList.remove('shake'); void dots.offsetWidth; dots.classList.add('shake');
-        setTimeout(pinDots, 250);
-        $('pin-err').textContent = 'Неверный PIN';
       }
+      return;
     }
+    pinBuf = '';
+    const dots = $('pin-dots');
+    dots.classList.remove('shake'); void dots.offsetWidth; dots.classList.add('shake');
+    setTimeout(pinDots, 250);
+    $('pin-err').textContent = 'Wrong PIN, try again';
   }
 
   actions.parent = function () {
-    if (!app.state.settings.pinHash) return ui.show('setup', {});
+    if (!SQ.family.isSetUp(app.state)) return ui.show('setup', {});
+    app.session = null;
     if (app.parentAt && Date.now() - app.parentAt < UNLOCK_MS) return ui.show('parent', { tab: 'progress' });
-    ui.show('pin');
+    ui.show('pin', { mode: 'parent' });
   };
   actions['pin-key'] = function (el) { pinKey(el.dataset.k); };
+  actions['pin-back'] = function () { ui.enter(); };
   actions['pin-forgot'] = function () { $('pin-forgot').hidden = false; $('forgot-word').focus(); };
   actions['pin-reset'] = function () {
     const w = $('forgot-word').value.trim().toUpperCase();
-    if (w !== 'СБРОС' && w !== 'RESET') { ui.toast('Напишите слово СБРОС'); return; }
+    if (w !== 'RESET') { ui.toast('Type the word RESET'); return; }
     SQ.sync.leave();
     SQ.storage.setMeta('active', null);
+    ui.selectChild(null);
     app.state = SQ.storage.blank();
     SQ.storage.save(app.state);
     app.parentAt = 0;
@@ -209,33 +236,48 @@
   /* ---------- parent panel ---------- */
 
   const TABS = [
-    ['progress', 'Прогресс'],
-    ['challenge', 'Правила'],
-    ['topics', 'Темы'],
-    ['devices', 'Устройства'],
-    ['data', 'Данные'],
+    ['progress', 'Progress', true],
+    ['challenge', 'Rules', true],
+    ['topics', 'Topics', true],
+    ['family', 'Family', false],
+    ['devices', 'Devices', false],
+    ['data', 'Data', false],
   ];
 
   screens.parent = function (args) {
-    if (!app.parentAt || Date.now() - app.parentAt > UNLOCK_MS * 6) return ui.show('pin');
+    if (!app.parentAt || Date.now() - app.parentAt > UNLOCK_MS * 6) return ui.show('pin', { mode: 'parent' });
     app.parentAt = Date.now();
     const tab = args.tab || 'progress';
-    const body = { progress: progressTab, challenge: challengeTab, topics: topicsTab, devices: devicesTab, data: dataTab }[tab](args);
+    const perChild = TABS.find(function (t) { return t[0] === tab; })[2];
+    const c = pk();
+    const list = kids();
+    const chips = perChild && list.length > 1
+      ? '<div class="kid-chips" role="group" aria-label="Child">' + list.map(function (k) {
+        return '<button class="kid-chip' + (k === c ? ' on' : '') + '" aria-pressed="' + (k === c) + '" data-act="parent-kid" data-id="' + esc(k.id) + '">' +
+          avatar(k) + esc(nameOf(k)) + '</button>';
+      }).join('') + '</div>'
+      : '';
+    const title = perChild ? esc(nameOf(c)) + (tab === 'progress' ? '’s progress' : tab === 'challenge' ? '’s rules' : '’s topics') : 'Parent panel';
+    const body = { progress: progressTab, challenge: challengeTab, topics: topicsTab, family: familyTab, devices: devicesTab, data: dataTab }[tab](args);
     ui.set(
       '<section class="parent">' +
-      '<div class="parent-head"><div><p class="eyebrow">Для родителей</p>' +
-      '<h1>' + esc(app.state.settings.childName || 'Ребёнок') + ': прогресс и настройки</h1></div>' +
-      '<button class="btn ghost small" data-act="parent-exit">Выйти</button></div>' +
+      '<div class="parent-head"><div><p class="eyebrow">For parents</p>' +
+      '<h1>' + title + '</h1></div>' +
+      '<button class="btn ghost small" data-act="parent-exit">Log out</button></div>' +
       '<nav class="tabs" role="tablist">' + TABS.map(function (t) {
         return '<button role="tab" class="tab' + (t[0] === tab ? ' on' : '') + '" aria-selected="' + (t[0] === tab) + '" data-act="parent-tab" data-tab="' + t[0] + '">' + t[1] + '</button>';
-      }).join('') + '</nav>' +
+      }).join('') + '</nav>' + chips +
       '<div class="tab-body">' + body + '</div></section>'
     );
     if (bind[tab]) bind[tab](args);
   };
 
   actions['parent-tab'] = function (el) { ui.show('parent', { tab: el.dataset.tab }); };
-  actions['parent-exit'] = function () { app.parentAt = 0; ui.show('home'); };
+  actions['parent-kid'] = function (el) {
+    app.parentChild = el.dataset.id;
+    ui.show('parent', { tab: app.screen.args.tab || 'progress' });
+  };
+  actions['parent-exit'] = function () { app.parentAt = 0; ui.enter(); };
 
   const bind = {};
 
@@ -244,17 +286,17 @@
   function setLabel(h) {
     if (h.mode === 'practice') {
       const t = SQ.topic(h.topic);
-      return 'Практика' + (t ? ': ' + esc(t.title) + ', ур. ' + h.level : '');
+      return 'Practice' + (t ? ': ' + esc(t.title) + ', level ' + h.level : '');
     }
-    return 'Испытание';
+    return 'Challenge';
   }
 
   function setResult(h) {
-    if (h.abandoned) return '<span class="pill warn">прерван</span>';
+    if (h.abandoned) return '<span class="pill warn">stopped part-way</span>';
     if (h.mode === 'challenge') {
-      if (h.perfect) return '<span class="pill good">' + h.correct + '/' + h.size + ' без ошибок</span>';
+      if (h.perfect) return '<span class="pill good">' + h.correct + '/' + h.size + ' perfect</span>';
       const firstBad = (h.items || []).findIndex(function (i) { return !i.ok; });
-      if (!h.completed && firstBad !== -1) return '<span class="pill bad">ошибка на ' + (firstBad + 1) + '-м вопросе</span>';
+      if (!h.completed && firstBad !== -1) return '<span class="pill bad">mistake on question ' + (firstBad + 1) + '</span>';
       return '<span class="pill bad">' + h.correct + '/' + h.size + '</span>';
     }
     return '<span class="pill ' + (h.correct === h.size ? 'good' : 'plain') + '">' + h.correct + '/' + (h.items || []).length + '</span>';
@@ -265,8 +307,13 @@
     return '<span class="meter ' + level + '" role="img" aria-label="' + pct(ratio) + '"><span style="width:' + Math.max(2, Math.round(ratio * 100)) + '%"></span></span>';
   }
 
+  function tile(label, value, sub) {
+    return '<div class="tile"><p class="tile-label">' + label + '</p><p class="tile-value">' + value + '</p>' +
+      (sub ? '<p class="tile-sub">' + sub + '</p>' : '') + '</div>';
+  }
+
   function progressTab() {
-    const s = app.state, st = s.settings;
+    const s = pk(), st = s.settings;
     const today = E.dayKey();
     const todays = s.history.filter(function (h) { return E.dayKey(h.ts) === today; });
     const chal = todays.filter(function (h) { return h.mode === 'challenge'; });
@@ -282,10 +329,10 @@
 
     const tiles =
       '<div class="tiles">' +
-      tile('Сетов сегодня', String(todays.length), 'испытание: ' + chal.length + ', практика: ' + (todays.length - chal.length)) +
-      tile('Без ошибок сегодня', String(perfect), 'из ' + chal.length + ' в испытании') +
-      tile('Игровое время сегодня', minsToday + ' мин', rewardsToday.length + ' ' + plural(rewardsToday.length, 'награда', 'награды', 'наград') + (st.dailyLimit ? ' из ' + st.dailyLimit : '')) +
-      tile('Точность за 7 дней', n ? pct(ok / n) : '—', n + ' ' + plural(n, 'ответ', 'ответа', 'ответов')) +
+      tile('Sets today', String(todays.length), 'challenge ' + chal.length + ', practice ' + (todays.length - chal.length)) +
+      tile('Perfect sets today', String(perfect), 'of ' + chal.length + ' in the challenge') +
+      tile('Game time today', minsToday + ' min', plural(rewardsToday.length, 'reward', 'rewards') + (st.dailyLimit ? ' of ' + st.dailyLimit : '')) +
+      tile('Accuracy, last 7 days', n ? pct(ok / n) : '—', plural(n, 'answer', 'answers')) +
       '</div>';
 
     let chance = '';
@@ -293,11 +340,11 @@
     if (ra) {
       const need = st.setSize * st.setsRequired;
       const p = Math.pow(ra.accuracy, need);
-      chance = '<div class="explain"><p>Точность в испытании за последние ' + ra.count + ' ответов: <b>' + pct(ra.accuracy) + '</b>. ' +
-        'Чтобы получить награду, нужно ответить верно на <b>' + need + ' вопросов подряд</b>. С такой точностью это получается примерно в ' +
-        '<b>' + (p >= 0.995 ? '100' : Math.max(1, Math.round(p * 100))) + '%</b> попыток' +
-        (p > 0 && p < 0.5 ? ' (в среднем одна удачная попытка из ' + Math.round(1 / p) + ')' : '') + '.</p>' +
-        (p < 0.15 ? '<p>Если выходит слишком тяжело, сделайте задание проще во вкладке «Правила» (меньше вопросов или сетов) или «Темы» (более лёгкие уровни), а потом поднимайте планку.</p>' : '') +
+      chance = '<div class="explain"><p>Accuracy in the challenge over the last ' + ra.count + ' answers: <b>' + pct(ra.accuracy) + '</b>. ' +
+        'A reward needs <b>' + need + ' correct answers in a row</b>. At this accuracy that works out in about ' +
+        '<b>' + (p >= 0.995 ? '100' : Math.max(1, Math.round(p * 100))) + '%</b> of attempts' +
+        (p > 0 && p < 0.5 ? ' (on average one successful attempt in ' + Math.round(1 / p) + ')' : '') + '.</p>' +
+        (p < 0.15 ? '<p>If that is too hard, make the challenge easier under Rules (fewer questions or sets) or Topics (easier levels), then raise the bar as things improve.</p>' : '') +
         '</div>';
     }
 
@@ -307,15 +354,15 @@
       .filter(function (m) { return SQ.topic(m.t); })
       .sort(function (a, b) { return a.ok / a.n - b.ok / b.n; });
     const table = rows.length
-      ? '<div class="table-wrap"><table class="stats"><thead><tr><th>Тема и уровень</th><th class="num">Ответов</th><th>Верно</th></tr></thead><tbody>' +
+      ? '<div class="table-wrap"><table class="stats"><thead><tr><th>Topic and level</th><th class="num">Answers</th><th>Correct</th></tr></thead><tbody>' +
         rows.map(function (m) {
           const t = SQ.topic(m.t), l = SQ.level(m.t, m.l);
           const r = m.ok / m.n;
           return '<tr><td>' + esc(t.title) + '<span class="muted"> · ' + m.l + '. ' + esc(l ? l.title : '') + '</span></td>' +
             '<td class="num">' + m.n + '</td><td class="acc"><span class="acc-num">' + pct(r) + '</span>' + meter(r) +
-            (r < 0.7 ? '<span class="pill bad small">трудно</span>' : '') + '</td></tr>';
+            (r < 0.7 ? '<span class="pill bad small">hard</span>' : '') + '</td></tr>';
         }).join('') + '</tbody></table></div>'
-      : '<p class="muted">Пока нет ответов за последние 30 дней.</p>';
+      : '<p class="muted">No answers in the last 30 days yet.</p>';
 
     const mistakes = [];
     for (let i = s.history.length - 1; i >= 0 && mistakes.length < 15; i--) {
@@ -327,40 +374,35 @@
     const mistakeList = mistakes.length
       ? '<ul class="review compact">' + mistakes.map(function (m) {
         return '<li><span class="rq">' + ui.text(m.it.q) + '</span>' +
-          '<span class="rg">ответ: <s>' + esc(m.it.g) + '</s></span>' +
-          '<span class="ra">верно: <b>' + esc(m.it.a) + '</b></span>' +
+          '<span class="rg">answered <s>' + esc(m.it.g) + '</s></span>' +
+          '<span class="ra">correct <b>' + esc(m.it.a) + '</b></span>' +
           '<span class="rt muted">' + when(m.ts) + '</span></li>';
       }).join('') + '</ul>'
-      : '<p class="muted">Ошибок пока нет.</p>';
+      : '<p class="muted">No mistakes yet.</p>';
 
     const recent = s.history.slice(-25).reverse();
     const historyList = recent.length
       ? '<ul class="hist">' + recent.map(function (h) {
         return '<li><span class="h-when muted">' + when(h.ts) + '</span><span class="h-what">' + setLabel(h) + '</span>' + setResult(h) + '</li>';
       }).join('') + '</ul>'
-      : '<p class="muted">Сетов пока не было.</p>';
+      : '<p class="muted">No sets yet.</p>';
 
     const rewards = s.rewards.slice(-10).reverse();
     const now = Date.now();
     const rewardList = rewards.length
       ? '<ul class="hist">' + rewards.map(function (r) {
-        const status = !r.startedAt ? '<span class="pill plain">ещё не начато</span>'
-          : r.endsAt > now ? '<span class="pill good">идёт, осталось ' + ui.fmtTime(r.endsAt - now) + '</span>'
-          : '<span class="pill plain">использовано' + (r.stoppedEarly ? ' (закончил раньше)' : '') + '</span>';
-        return '<li><span class="h-when muted">' + when(r.ts) + '</span><span class="h-what">' + r.minutes + ' мин игры</span>' + status + '</li>';
+        const status = !r.startedAt ? '<span class="pill plain">not started yet</span>'
+          : r.endsAt > now ? '<span class="pill good">running, ' + ui.fmtTime(r.endsAt - now) + ' left</span>'
+          : '<span class="pill plain">used' + (r.stoppedEarly ? ' (stopped early)' : '') + '</span>';
+        return '<li><span class="h-when muted">' + when(r.ts) + '</span><span class="h-what">' + r.minutes + ' min of games</span>' + status + '</li>';
       }).join('') + '</ul>'
-      : '<p class="muted">Наград пока не было.</p>';
+      : '<p class="muted">No rewards yet.</p>';
 
     return tiles + chance +
-      '<section class="p-sec"><h2>Где трудно (30 дней)</h2><p class="muted small">Сначала самые трудные. Зелёный: 90% и выше, жёлтый: 70–89%, красный: ниже 70%.</p>' + table + '</section>' +
-      '<section class="p-sec"><h2>Последние ошибки</h2>' + mistakeList + '</section>' +
-      '<section class="p-sec"><h2>История сетов</h2>' + historyList + '</section>' +
-      '<section class="p-sec"><h2>Игровое время</h2>' + rewardList + '</section>';
-  }
-
-  function tile(label, value, sub) {
-    return '<div class="tile"><p class="tile-label">' + label + '</p><p class="tile-value">' + value + '</p>' +
-      (sub ? '<p class="tile-sub">' + sub + '</p>' : '') + '</div>';
+      '<section class="p-sec"><h2>What’s hard (last 30 days)</h2><p class="muted small">Hardest first. Green: 90% or more, amber: 70–89%, red: below 70%.</p>' + table + '</section>' +
+      '<section class="p-sec"><h2>Recent mistakes</h2>' + mistakeList + '</section>' +
+      '<section class="p-sec"><h2>Set history</h2>' + historyList + '</section>' +
+      '<section class="p-sec"><h2>Game time</h2>' + rewardList + '</section>';
   }
 
   /* ----- challenge rules ----- */
@@ -373,27 +415,27 @@
   }
 
   function challengeTab() {
-    const st = app.state.settings;
+    const st = pk().settings;
     return '<form id="rules-form" class="form two-col" novalidate>' +
-      select('set-size', 'Вопросов в одном сете', st.setSize, [5, 6, 8, 10, 12, 15, 20]) +
-      select('sets-required', 'Идеальных сетов подряд для награды', st.setsRequired, [1, 2, 3, 4, 5]) +
-      select('reward-minutes', 'Минут игры за одну награду', st.rewardMinutes, [10, 15, 20, 30, 40, 45, 60, 90, 120]) +
-      select('daily-limit', 'Наград в день, не больше', st.dailyLimit, [[0, 'без ограничения'], 1, 2, 3, 4, 5]) +
-      '<fieldset class="field wide"><legend>Если ребёнок ошибся в испытании</legend>' +
-      '<label class="radio"><input type="radio" name="on-mistake" value="restart"' + (st.onMistake === 'restart' ? ' checked' : '') + '><span><b>Сет сразу заканчивается.</b> Видит разбор ошибки и начинает новый сет. Быстрее и честнее.</span></label>' +
-      '<label class="radio"><input type="radio" name="on-mistake" value="finish"' + (st.onMistake === 'finish' ? ' checked' : '') + '><span><b>Сет дорешивается до конца,</b> но не засчитывается. Больше практики, но дольше.</span></label>' +
+      select('set-size', 'Questions in a set', st.setSize, [5, 6, 8, 10, 12, 15, 20]) +
+      select('sets-required', 'Perfect sets in a row for a reward', st.setsRequired, [1, 2, 3, 4, 5]) +
+      select('reward-minutes', 'Minutes of games per reward', st.rewardMinutes, [10, 15, 20, 30, 40, 45, 60, 90, 120]) +
+      select('daily-limit', 'Rewards per day, at most', st.dailyLimit, [[0, 'no limit'], 1, 2, 3, 4, 5]) +
+      '<fieldset class="field wide"><legend>When a challenge answer is wrong</legend>' +
+      '<label class="radio"><input type="radio" name="on-mistake" value="restart"' + (st.onMistake === 'restart' ? ' checked' : '') + '><span><b>The set ends straight away.</b> Your child sees the worked answer and starts a new set. Quicker, and harder to game.</span></label>' +
+      '<label class="radio"><input type="radio" name="on-mistake" value="finish"' + (st.onMistake === 'finish' ? ' checked' : '') + '><span><b>The set carries on to the end</b> but doesn’t count. More practice, but longer.</span></label>' +
       '</fieldset>' +
-      '<label class="check wide"><input type="checkbox" id="sound"' + (st.sound ? ' checked' : '') + '><span>Звуки при ответах</span></label>' +
+      '<label class="check wide"><input type="checkbox" id="sound"' + (st.sound ? ' checked' : '') + '><span>Sounds for answers</span></label>' +
       '</form>' +
-      '<p class="muted small">Изменения сохраняются сразу и попадают на все подключённые устройства.</p>' +
-      '<div class="explain"><p><b>Как работает испытание.</b> Каждый сет состоит из примеров по темам из вкладки «Темы» вперемешку. ' +
-      'Засчитываются только сеты без единой ошибки, идущие подряд в один день. Любая ошибка, выход из сета или закрытие страницы посреди сета обнуляют серию. ' +
-      'После награды ребёнок сам запускает таймер игрового времени. В «Прогрессе» видно, когда он это сделал.</p>' +
-      '<p>Практика по отдельным темам на награду не влияет. Ошибки там ничего не стоят, так что там удобно разбирать трудные места.</p></div>';
+      '<p class="muted small">Changes save straight away and reach every connected device.</p>' +
+      '<div class="explain"><p><b>How the challenge works.</b> Each set mixes questions from the topics ticked under Topics. ' +
+      'Only sets with no mistakes count, and they must be in a row on the same day. A mistake, stopping a set, or closing the page in the middle of a set resets the run. ' +
+      'After a reward your child starts the game timer. Progress shows when that happened.</p>' +
+      '<p>Practice on single topics never affects rewards. Mistakes there cost nothing, so it is the place to work on the hard parts.</p></div>';
   }
 
   bind.challenge = function () {
-    const st = app.state.settings;
+    const c = pk(), st = c.settings;
     const form = $('rules-form');
     form.addEventListener('change', function () {
       st.setSize = Number($('set-size').value);
@@ -403,21 +445,21 @@
       const r = form.querySelector('input[name="on-mistake"]:checked');
       st.onMistake = r ? r.value : 'restart';
       st.sound = $('sound').checked;
-      ui.touchSettings();
+      ui.touchSettings(c);
       ui.commit();
-      ui.toast('Сохранено');
+      ui.toast('Saved');
     });
   };
 
   /* ----- topics ----- */
 
   function topicsTab() {
-    const asg = app.state.settings.assignment;
+    const asg = pk().settings.assignment;
     const has = function (t, l) {
       const a = asg.find(function (x) { return x.topic === t; });
       return !!a && a.levels.indexOf(l) !== -1;
     };
-    return '<p class="muted">Отметьте, какие темы и уровни входят в испытание за игровое время. Названия уровней на английском, как их видит ребёнок. Вся практика доступна ему всегда.</p>' +
+    return '<p class="muted">Tick the topics and levels that make up the game-time challenge. All topics stay open for practice either way.</p>' +
       '<form id="topics-form" class="form" novalidate>' +
       SQ.subjects().map(function (subj) {
         return '<div class="subject-block"><h2>' + esc(subj.title) + '</h2>' + subj.topics.map(function (t) {
@@ -427,10 +469,11 @@
           }).join('') + '</fieldset>';
         }).join('') + '</div>';
       }).join('') + '</form>' +
-      '<div class="explain"><p><b>Совет.</b> Если ребёнку трудно, начните с одного-двух уровней, а новые добавляйте, когда он начнёт стабильно проходить испытание. В «Прогрессе» видно, на каких уровнях он ошибается чаще всего.</p></div>';
+      '<div class="explain"><p><b>Tip.</b> If it’s hard going, start with one or two levels and add more once the challenge is passed regularly. Progress shows which levels cause the most mistakes.</p></div>';
   }
 
   bind.topics = function () {
+    const c = pk();
     const form = $('topics-form');
     form.addEventListener('change', function (e) {
       const boxes = form.querySelectorAll('input[type="checkbox"]');
@@ -444,14 +487,127 @@
       });
       if (!order.length) {
         e.target.checked = true;
-        ui.toast('Нужна хотя бы одна тема');
+        ui.toast('Keep at least one level ticked');
         return;
       }
-      app.state.settings.assignment = order.map(function (t) { return { topic: t, levels: map[t] }; });
-      ui.touchSettings();
+      c.settings.assignment = order.map(function (t) { return { topic: t, levels: map[t] }; });
+      ui.touchSettings(c);
       ui.commit();
-      ui.toast('Сохранено');
+      ui.toast('Saved');
     });
+  };
+
+  /* ----- family: children and PINs ----- */
+
+  function familyTab(args) {
+    const list = kids();
+    const rows = list.map(function (c) {
+      const sets = c.history.length;
+      const editing = args.edit === c.id;
+      const row = '<li class="kid-row">' + avatar(c) +
+        '<div class="kid-info"><b>' + esc(nameOf(c)) + '</b>' +
+        '<span class="muted small">' + (c.settings.childPinHash ? 'PIN on' : 'no PIN') + ' · ' +
+        plural(sets, 'set', 'sets') + (c.id === app.childId ? ' · using this device' : '') + '</span></div>' +
+        (editing ? '' : '<button class="btn small" data-act="kid-edit" data-id="' + esc(c.id) + '">Edit</button>') + '</li>';
+      if (!editing) return row;
+      const confirm = args.confirmDelete === c.id;
+      return row + '<li class="kid-edit"><form id="kid-form" class="form" data-id="' + esc(c.id) + '" novalidate>' +
+        '<label class="field"><span>Name</span><input id="kid-name" maxlength="30" value="' + esc(c.settings.childName) + '"></label>' +
+        '<label class="field"><span>' + (c.settings.childPinHash ? 'New child PIN (leave empty to keep it)' : 'Child PIN, 4 digits (optional)') + '</span>' +
+        '<input id="kid-pin" type="password" inputmode="numeric" maxlength="4" autocomplete="new-password"></label>' +
+        '<p class="muted small">A child PIN helps when children share a device: a brother or sister can’t open someone else’s profile.</p>' +
+        '<p class="form-err" id="kid-err" role="alert"></p>' +
+        '<div class="btn-row"><button class="btn primary" type="submit">Save</button>' +
+        '<button class="btn ghost" type="button" data-act="kid-cancel">Cancel</button>' +
+        (c.settings.childPinHash ? '<button class="btn ghost" type="button" data-act="kid-nopin" data-id="' + esc(c.id) + '">Remove PIN</button>' : '') +
+        (list.length > 1 ? '<button class="btn danger" type="button" data-act="kid-delete" data-id="' + esc(c.id) + '">' +
+          (confirm ? 'Delete ' + esc(nameOf(c)) + '? Click again to confirm' : 'Delete profile') + '</button>' : '') +
+        '</div></form></li>';
+    }).join('');
+
+    return '<section class="p-sec"><h2>Children</h2>' +
+      '<p class="muted">Each child has their own progress, rules and topics. On a device with several profiles, the site asks “Who’s studying?” first.</p>' +
+      '<ul class="kids">' + rows + '</ul></section>' +
+      '<section class="p-sec"><h2>Add a child</h2>' +
+      '<form id="add-kid" class="form inline" novalidate><label class="field"><span>Name</span><input id="new-kid-name" maxlength="30" autocomplete="off"></label>' +
+      '<button class="btn" type="submit">Add</button></form>' +
+      '<p class="muted small">A new profile starts with the standard rules and topics. Change them under Rules and Topics after picking the child at the top.</p></section>' +
+      '<section class="p-sec"><h2>Parent PIN</h2>' +
+      '<form id="pin-form" class="form inline" novalidate>' +
+      '<label class="field"><span>New PIN</span><input id="new-pin" type="password" inputmode="numeric" maxlength="4" autocomplete="new-password"></label>' +
+      '<label class="field"><span>Repeat it</span><input id="new-pin2" type="password" inputmode="numeric" maxlength="4" autocomplete="new-password"></label>' +
+      '<button class="btn" type="submit">Change PIN</button></form><p class="form-err" id="pin-form-err" role="alert"></p></section>';
+  }
+
+  bind.family = function () {
+    const kf = $('kid-form');
+    if (kf) kf.addEventListener('submit', function (e) {
+      e.preventDefault();
+      const c = SQ.family.child(app.state, kf.dataset.id);
+      if (!c) return;
+      const name = $('kid-name').value.trim();
+      const pin = $('kid-pin').value.trim();
+      const err = $('kid-err');
+      if (!name) { err.textContent = 'Enter a name.'; return; }
+      if (pin && !validPin(pin)) { err.textContent = 'The PIN must be 4 digits.'; return; }
+      c.settings.childName = name;
+      if (pin) c.settings.childPinHash = SQ.hashPin(pin);
+      ui.touchSettings(c);
+      ui.commit();
+      ui.show('parent', { tab: 'family' });
+      ui.toast('Saved');
+    });
+
+    $('add-kid').addEventListener('submit', function (e) {
+      e.preventDefault();
+      const name = $('new-kid-name').value.trim();
+      if (!name) { ui.toast('Enter a name'); return; }
+      const c = SQ.storage.blankChild(name);
+      app.state.children.push(c);
+      app.parentChild = c.id;
+      ui.commit();
+      ui.show('parent', { tab: 'family' });
+      ui.toast('Profile added');
+    });
+
+    $('pin-form').addEventListener('submit', function (e) {
+      e.preventDefault();
+      const a = $('new-pin').value.trim(), b = $('new-pin2').value.trim();
+      const err = $('pin-form-err');
+      if (!validPin(a)) { err.textContent = 'The PIN must be 4 digits.'; return; }
+      if (a !== b) { err.textContent = 'The PINs don’t match.'; return; }
+      app.state.family.pinHash = SQ.hashPin(a);
+      ui.touchFamily();
+      ui.commit();
+      err.textContent = '';
+      $('new-pin').value = ''; $('new-pin2').value = '';
+      ui.toast('PIN changed');
+    });
+  };
+
+  actions['kid-edit'] = function (el) { ui.show('parent', { tab: 'family', edit: el.dataset.id }); };
+  actions['kid-cancel'] = function () { ui.show('parent', { tab: 'family' }); };
+  actions['kid-nopin'] = function (el) {
+    const c = SQ.family.child(app.state, el.dataset.id);
+    if (!c) return;
+    c.settings.childPinHash = null;
+    ui.touchSettings(c);
+    ui.commit();
+    ui.show('parent', { tab: 'family', edit: c.id });
+    ui.toast('PIN removed');
+  };
+  actions['kid-delete'] = function (el) {
+    const id = el.dataset.id;
+    const args = app.screen.args;
+    if (args.confirmDelete !== id) return ui.show('parent', { tab: 'family', edit: id, confirmDelete: id });
+    const c = SQ.family.child(app.state, id);
+    if (!c || kids().length < 2) return;
+    c.deletedAt = Date.now();
+    if (app.childId === id) ui.selectChild(null);
+    if (app.parentChild === id) app.parentChild = null;
+    ui.commit();
+    ui.show('parent', { tab: 'family' });
+    ui.toast('Profile deleted');
   };
 
   /* ----- devices ----- */
@@ -459,36 +615,37 @@
   function devicesTab(args) {
     const S = SQ.sync;
     if (!S.enabled && !S.family) {
-      return '<div class="explain"><p><b>Синхронизация недоступна.</b> Сейчас сайт открыт без сервера, поэтому прогресс хранится только в этом браузере.</p>' +
-        '<p>Чтобы телефон и компьютер ребёнка (и ваш телефон) видели общий прогресс, загрузите сайт целиком, вместе с папкой <code>api</code>, на хостинг с PHP. Синхронизация включится сама.</p></div>';
+      return '<div class="explain"><p><b>Sync isn’t available.</b> This copy of the site has no server, so progress is kept in this browser only.</p>' +
+        '<p>To share progress between your child’s phone and computer (and your phone), upload the whole site, including the <code>api</code> folder, to hosting with PHP. Sync then switches on by itself.</p></div>';
     }
     if (!S.family) {
-      return '<section class="p-sec"><h2>Синхронизация выключена на этом устройстве</h2>' +
-        '<p class="muted">Включите её здесь, если это первое устройство. Если на другом устройстве уже есть код семьи, введите его ниже.</p>' +
-        '<button class="btn primary" data-act="sync-create">Включить синхронизацию</button></section>' +
-        '<section class="p-sec"><h2>Подключиться к существующей семье</h2>' +
-        '<form id="join2-form" class="form inline" novalidate><label class="field"><span>Код семьи</span>' +
+      return '<section class="p-sec"><h2>Sync is off on this device</h2>' +
+        '<p class="muted">Turn it on here if this is the first device. If another device already has a family code, enter it below.</p>' +
+        '<button class="btn primary" data-act="sync-create">Turn on sync</button></section>' +
+        '<section class="p-sec"><h2>Join an existing family</h2>' +
+        '<form id="join2-form" class="form inline" novalidate><label class="field"><span>Family code</span>' +
         '<input id="join2-code" class="code-input" maxlength="14" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX-XXXX"></label>' +
-        '<button class="btn" type="submit">Подключить</button></form><p class="form-err" id="join2-err" role="alert"></p>' +
-        '<p class="muted small">Данные этого устройства объединятся с данными семьи, ничего не пропадёт.</p></section>';
+        '<button class="btn" type="submit">Connect</button></form><p class="form-err" id="join2-err" role="alert"></p>' +
+        '<p class="muted small">This device’s data is combined with the family’s. Nothing is lost.</p></section>';
     }
     const link = joinLink(S.family);
-    const status = S.status === 'ok' ? '<span class="pill good">синхронизировано</span>'
-      : S.status === 'syncing' ? '<span class="pill plain">синхронизация…</span>'
-      : '<span class="pill warn">нет связи, данные отправятся позже</span>';
-    return (args.fresh ? '<div class="notice good"><p><b>Готово!</b> Осталось подключить устройства ребёнка: откройте на его телефоне и компьютере ссылку ниже. Сделать это нужно один раз на каждом устройстве.</p>' +
-      '<button class="btn primary" data-act="home">Перейти на главную</button></div>' : '') +
-      '<section class="p-sec"><h2>Код семьи</h2>' +
+    const status = S.status === 'ok' ? '<span class="pill good">synced</span>'
+      : S.status === 'syncing' ? '<span class="pill plain">syncing…</span>'
+      : '<span class="pill warn">offline, changes will be sent later</span>';
+    return (args.fresh ? '<div class="notice good"><p><b>All set!</b> Now connect your child’s devices: open the link below on their phone and computer. You only need to do this once per device.</p>' +
+      '<button class="btn primary" data-act="parent-exit">Go to the home page</button></div>' : '') +
+      '<section class="p-sec"><h2>Family code</h2>' +
       '<p class="family-code" id="family-code">' + esc(S.family) + '</p>' +
       '<p>' + status + '</p>' +
-      '<div class="copy-row"><input id="join-link" class="link-input" readonly value="' + esc(link) + '" aria-label="Ссылка для подключения">' +
-      '<button class="btn" data-act="copy-link">Скопировать ссылку</button></div>' +
-      '<ol class="howto"><li>Откройте эту ссылку на телефоне или компьютере ребёнка, например отправьте её себе в мессенджер.</li>' +
-      '<li>Устройство подключится само. Или введите код вручную: «У меня есть код семьи».</li>' +
-      '<li>Чтобы видеть прогресс со своего телефона, подключите его так же, а затем откройте «For parents».</li></ol>' +
-      '<p class="muted small">Код работает как пароль к прогрессу семьи. Не публикуйте его.</p></section>' +
-      '<section class="p-sec"><h2>Отключить это устройство</h2><p class="muted">Данные на этом устройстве останутся, но перестанут синхронизироваться.</p>' +
-      '<button class="btn ghost" data-act="sync-leave">Отключить синхронизацию здесь</button></section>';
+      '<div class="copy-row"><input id="join-link" class="link-input" readonly value="' + esc(link) + '" aria-label="Link to connect a device">' +
+      '<button class="btn" data-act="copy-link">Copy link</button></div>' +
+      '<ol class="howto"><li>Open this link on your child’s phone or computer, for example by sending it to yourself in a messaging app.</li>' +
+      '<li>The device connects by itself. Or enter the code by hand under “I have a family code”.</li>' +
+      '<li>With several children, the device asks who is using it. Each device remembers the choice.</li>' +
+      '<li>To follow progress from your own phone, connect it the same way, then open For parents.</li></ol>' +
+      '<p class="muted small">The code works like a password to your family’s progress. Don’t share it publicly.</p></section>' +
+      '<section class="p-sec"><h2>Disconnect this device</h2><p class="muted">The data on this device stays, but it stops syncing.</p>' +
+      '<button class="btn ghost" data-act="sync-leave">Turn off sync here</button></section>';
   }
 
   bind.devices = function () {
@@ -502,17 +659,18 @@
     f.addEventListener('submit', function (e) {
       e.preventDefault();
       const err = $('join2-err');
-      err.textContent = 'Проверяю код…';
+      err.textContent = 'Checking the code…';
       SQ.sync.join(inp.value).then(function (remote) {
-        // The family's settings (rules, topics, PIN) win over this device's.
-        app.state.settings.updatedAt = 0;
+        // The family's PIN and settings win over this device's.
+        app.state.family.updatedAt = 0;
+        app.state.children.forEach(function (c) { c.settings.updatedAt = 0; });
         app.state = SQ.storage.merge(app.state, remote);
         ui.commit();
         ui.show('parent', { tab: 'devices' });
-        ui.toast('Устройство подключено');
+        ui.toast('Device connected');
       }).catch(function (ex) {
-        err.textContent = ex.message === 'invalid' ? 'Код выглядит так: XXXX-XXXX-XXXX.'
-          : ex.message === 'not-found' ? 'Такой код не найден.' : 'Нет связи с сервером.';
+        err.textContent = ex.message === 'invalid' ? 'A family code looks like XXXX-XXXX-XXXX.'
+          : ex.message === 'not-found' ? 'That code wasn’t found.' : 'Can’t reach the server.';
       });
     });
   };
@@ -525,76 +683,55 @@
   actions['sync-leave'] = function () {
     SQ.sync.leave();
     ui.show('parent', { tab: 'devices' });
-    ui.toast('Синхронизация на этом устройстве выключена');
+    ui.toast('Sync is off on this device');
   };
   actions['copy-link'] = function () {
     const inp = $('join-link');
     inp.select();
-    copy(inp.value, 'Ссылка скопирована');
+    copy(inp.value, 'Link copied');
   };
 
   /* ----- data ----- */
 
   function dataTab() {
-    const st = app.state.settings;
-    return '<section class="p-sec"><h2>Имя ребёнка</h2>' +
-      '<form id="name-form" class="form inline" novalidate><label class="field"><span>Имя</span><input id="child-name" maxlength="30" value="' + esc(st.childName) + '"></label>' +
-      '<button class="btn" type="submit">Сохранить</button></form></section>' +
-      '<section class="p-sec"><h2>Сменить PIN</h2>' +
-      '<form id="pin-form" class="form inline" novalidate>' +
-      '<label class="field"><span>Новый PIN</span><input id="new-pin" type="password" inputmode="numeric" maxlength="4" autocomplete="new-password"></label>' +
-      '<label class="field"><span>Ещё раз</span><input id="new-pin2" type="password" inputmode="numeric" maxlength="4" autocomplete="new-password"></label>' +
-      '<button class="btn" type="submit">Сменить</button></form><p class="form-err" id="pin-form-err" role="alert"></p></section>' +
-      '<section class="p-sec"><h2>Резервная копия</h2>' +
-      '<p class="muted">Весь прогресс и настройки в виде текста. Можно сохранить себе и потом восстановить или перенести на другое устройство без синхронизации.</p>' +
-      '<div class="btn-row"><button class="btn" data-act="backup-show">Показать копию</button><button class="btn ghost" data-act="backup-copy">Скопировать</button></div>' +
-      '<textarea id="backup-out" class="code-area" readonly hidden aria-label="Резервная копия"></textarea>' +
-      '<label class="field"><span>Восстановить: вставьте сюда текст копии</span><textarea id="backup-in" class="code-area" spellcheck="false"></textarea></label>' +
-      '<button class="btn" data-act="backup-restore">Восстановить из копии</button>' +
-      '<p class="muted small">Копия объединяется с текущими данными, ничего не стирается.</p></section>' +
-      '<section class="p-sec danger-zone"><h2>Сбросить прогресс</h2>' +
-      '<p class="muted">Удаляет историю, награды и серию на всех подключённых устройствах. Настройки, темы и PIN остаются.</p>' +
-      '<form id="reset-form" class="form inline" novalidate><label class="field"><span>Чтобы сбросить, напишите СБРОС</span><input id="reset-word" autocomplete="off"></label>' +
-      '<button class="btn danger" type="submit">Сбросить прогресс</button></form></section>';
+    const list = kids();
+    const c = pk();
+    return '<section class="p-sec"><h2>Backup</h2>' +
+      '<p class="muted">The whole family’s progress and settings as text. Keep it somewhere safe, then restore it later or move it to a device without sync.</p>' +
+      '<div class="btn-row"><button class="btn" data-act="backup-show">Show backup</button><button class="btn ghost" data-act="backup-copy">Copy</button></div>' +
+      '<textarea id="backup-out" class="code-area" readonly hidden aria-label="Backup"></textarea>' +
+      '<label class="field"><span>Restore: paste the backup text here</span><textarea id="backup-in" class="code-area" spellcheck="false"></textarea></label>' +
+      '<button class="btn" data-act="backup-restore">Restore from backup</button>' +
+      '<p class="muted small">A backup is combined with the current data. Nothing is erased.</p></section>' +
+      '<section class="p-sec danger-zone"><h2>Reset progress</h2>' +
+      '<form id="reset-form" class="form" novalidate>' +
+      (list.length > 1
+        ? '<label class="field"><span>Whose progress</span><select id="reset-kid">' + list.map(function (k) {
+          return '<option value="' + esc(k.id) + '"' + (k === c ? ' selected' : '') + '>' + esc(nameOf(k)) + '</option>';
+        }).join('') + '</select></label>'
+        : '') +
+      '<p class="muted">Deletes the history, rewards and run of ' + (list.length > 1 ? 'the chosen child' : esc(nameOf(c))) + ' on every connected device. Rules, topics and PINs stay.</p>' +
+      '<div class="form inline"><label class="field"><span>Type RESET to confirm</span><input id="reset-word" autocomplete="off"></label>' +
+      '<button class="btn danger" type="submit">Reset progress</button></div></form></section>';
   }
 
   bind.data = function () {
-    $('name-form').addEventListener('submit', function (e) {
-      e.preventDefault();
-      const v = $('child-name').value.trim();
-      if (!v) { ui.toast('Введите имя'); return; }
-      app.state.settings.childName = v;
-      ui.touchSettings();
-      ui.commit();
-      ui.toast('Сохранено');
-      ui.chrome();
-    });
-    $('pin-form').addEventListener('submit', function (e) {
-      e.preventDefault();
-      const a = $('new-pin').value.trim(), b = $('new-pin2').value.trim();
-      const err = $('pin-form-err');
-      if (!validPin(a)) { err.textContent = 'PIN должен состоять из 4 цифр.'; return; }
-      if (a !== b) { err.textContent = 'PIN-коды не совпадают.'; return; }
-      app.state.settings.pinHash = SQ.hashPin(a);
-      ui.touchSettings();
-      ui.commit();
-      err.textContent = '';
-      $('new-pin').value = ''; $('new-pin2').value = '';
-      ui.toast('PIN изменён');
-    });
     $('reset-form').addEventListener('submit', function (e) {
       e.preventDefault();
       const w = $('reset-word').value.trim().toUpperCase();
-      if (w !== 'СБРОС' && w !== 'RESET') { ui.toast('Напишите слово СБРОС'); return; }
-      const s = app.state;
-      s.resetAt = Date.now();
-      s.history = [];
-      s.rewards = [];
-      s.progress = { streak: 0, streakDay: '', run: 0, bestRun: 0, updatedAt: Date.now() };
-      SQ.storage.setMeta('active', null);
+      if (w !== 'RESET') { ui.toast('Type the word RESET'); return; }
+      const sel = $('reset-kid');
+      const c = sel ? SQ.family.child(app.state, sel.value) : pk();
+      if (!c) return;
+      c.resetAt = Date.now();
+      c.history = [];
+      c.rewards = [];
+      c.progress = { streak: 0, streakDay: '', run: 0, bestRun: 0, updatedAt: Date.now() };
+      if (c.id === app.childId) SQ.storage.setMeta('active', null);
+      app.parentChild = c.id;
       ui.commit();
       ui.show('parent', { tab: 'progress' });
-      ui.toast('Прогресс сброшен');
+      ui.toast('Progress reset for ' + nameOf(c));
     });
   };
 
@@ -609,19 +746,19 @@
     out.value = JSON.stringify(app.state);
     out.hidden = false;
     out.select();
-    copy(out.value, 'Копия скопирована');
+    copy(out.value, 'Backup copied');
   };
   actions['backup-restore'] = function () {
     const txt = $('backup-in').value.trim();
-    if (!txt) { ui.toast('Сначала вставьте текст копии'); return; }
+    if (!txt) { ui.toast('Paste the backup text first'); return; }
     try {
       const incoming = SQ.storage.parseBackup(txt);
       app.state = SQ.storage.merge(app.state, incoming);
       ui.commit();
       ui.show('parent', { tab: 'progress' });
-      ui.toast('Копия восстановлена');
+      ui.toast('Backup restored');
     } catch (e) {
-      ui.toast('Это не похоже на копию Study Quest');
+      ui.toast('That doesn’t look like a Study Quest backup');
     }
   };
 })(typeof window !== 'undefined' ? window : globalThis);

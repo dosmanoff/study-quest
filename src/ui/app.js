@@ -14,11 +14,13 @@
     back: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>',
     del: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11v12H9l-6-6z"/><path d="M12.5 9.5l5 5M17.5 9.5l-5 5"/></svg>',
     close: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>',
+    swap: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10l5 5 5-5"/></svg>',
+    lock: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>',
   };
 
   const PRAISE = ['Correct!', 'Spot on!', 'Yes!', 'Nice one!', 'That’s it!', 'Great!', 'Exactly right!'];
 
-  const app = (SQ.app = { state: null, screen: null, session: null });
+  const app = (SQ.app = { state: null, childId: null, screen: null, session: null });
   const ui = (SQ.ui = { ICON: ICON, screens: {}, actions: {} });
   const screens = ui.screens, actions = ui.actions;
   const coarse = root.matchMedia && root.matchMedia('(pointer: coarse)').matches;
@@ -35,8 +37,27 @@
     SQ.storage.save(app.state);
     SQ.sync.changed();
   };
-  ui.touchSettings = function () { app.state.settings.updatedAt = Date.now(); };
-  ui.touchProgress = function () { app.state.progress.updatedAt = Date.now(); };
+  /** The child whose profile is open on this device. */
+  function kid() { return app.state ? SQ.family.child(app.state, app.childId) : null; }
+  ui.kid = kid;
+  ui.selectChild = function (id) {
+    app.childId = id;
+    SQ.storage.setMeta('child', id);
+  };
+  ui.touchSettings = function (c) { (c || kid()).settings.updatedAt = Date.now(); };
+  ui.touchProgress = function (c) { (c || kid()).progress.updatedAt = Date.now(); };
+  ui.touchFamily = function () { app.state.family.updatedAt = Date.now(); };
+
+  /** Pick the right first screen: setup, "who's studying", or home. */
+  ui.enter = function (args) {
+    if (!SQ.family.isSetUp(app.state)) return ui.show('setup', args || {});
+    if (!kid()) {
+      const kids = SQ.family.children(app.state);
+      if (kids.length === 1) ui.selectChild(kids[0].id);
+      else return ui.show('who');
+    }
+    ui.show('home');
+  };
 
   ui.toast = function (msg, kind) {
     let box = doc.getElementById('toast');
@@ -65,7 +86,7 @@
   ui.refresh = function () {
     const s = app.screen;
     if (!s) return;
-    if (s.name === 'home' || s.name === 'topic' || (s.name === 'parent' && (s.args.tab || 'progress') === 'progress')) {
+    if (s.name === 'home' || s.name === 'topic' || s.name === 'who' || (s.name === 'parent' && (s.args.tab || 'progress') === 'progress')) {
       const y = root.scrollY;
       screens[s.name](s.args);
       try { root.scrollTo(0, y); } catch (e) { /* ignore */ }
@@ -77,6 +98,12 @@
   function adopt(next) {
     app.state = next;
     SQ.storage.save(next);
+    if (app.childId && !kid() && SQ.family.isSetUp(next)) {
+      // This profile was removed on another device.
+      app.session = null;
+      ui.selectChild(null);
+      return ui.enter();
+    }
     ui.refresh();
   }
 
@@ -88,11 +115,16 @@
   }
   ui.fmtTime = fmtTime;
 
-  function childName() { return app.state.settings.childName || 'there'; }
+  function childName() { return (kid() && kid().settings.childName) || 'there'; }
 
   ui.chrome = function () {
     if (!$who) return;
-    $who.textContent = app.state && app.state.settings.childName ? app.state.settings.childName : '';
+    const c = kid();
+    const many = app.state && SQ.family.children(app.state).length > 1;
+    $who.hidden = !c;
+    $who.disabled = !many;
+    $who.innerHTML = c ? esc(c.settings.childName) + (many ? ICON.swap : '') : '';
+    $who.setAttribute('aria-label', c ? (many ? 'Switch profile, now ' : 'Profile: ') + c.settings.childName : '');
     const st = SQ.sync.status;
     $sync.hidden = st === 'off' || st === 'ready' || st === 'checking';
     $sync.className = 'sync-dot ' + st;
@@ -133,7 +165,7 @@
       '<div class="bar-right">' +
       '<button class="timer-chip" data-act="home" hidden></button>' +
       '<span class="sync-dot" hidden></span>' +
-      '<span class="who"></span>' +
+      '<button class="who" data-act="switch-child" hidden></button>' +
       '</div></div></header>' +
       '<main id="screen" class="screen" tabindex="-1"></main>' +
       '<footer class="foot"><button class="link" data-act="parent">For parents</button>' +
@@ -190,7 +222,7 @@
   }
 
   screens.home = function () {
-    const s = app.state, st = s.settings;
+    const s = kid(), st = s.settings;
     const streak = Math.min(E.currentStreak(s), st.setsRequired);
     const need = st.setsRequired;
     const pool = E.poolFrom(st.assignment);
@@ -262,8 +294,8 @@
     const t = SQ.topic(args.topic);
     if (!t) return ui.show('home');
     const subj = SQ.subject(t.subject);
-    const stats = ui.levelStats(app.state);
-    const mix = app.state.settings.assignment.find(function (a) { return a.topic === t.id; });
+    const stats = ui.levelStats(kid());
+    const mix = kid().settings.assignment.find(function (a) { return a.topic === t.id; });
     const levels = t.levels.map(function (l) {
       const m = stats[t.id + '|' + l.id];
       const inMix = mix && mix.levels.indexOf(l.id) !== -1;
@@ -294,7 +326,7 @@
   /* ---------- quiz ---------- */
 
   function markActiveSet(sess) {
-    SQ.storage.setMeta('active', sess ? { ts: sess.startedAt, items: sess.results } : null);
+    SQ.storage.setMeta('active', sess ? { childId: app.childId, ts: sess.startedAt, items: sess.results } : null);
   }
 
   function recordSet(sess, extra) {
@@ -313,26 +345,26 @@
       completed: items.length === sess.questions.length,
       items: items,
     }, extra || {});
-    app.state.history.push(h);
+    kid().history.push(h);
     return h;
   }
 
   /** A challenge set that was left half-way (page closed or Stop pressed) breaks the run. */
-  function applyAbandoned(meta) {
-    const p = app.state.progress;
+  function applyAbandoned(child, meta) {
+    const p = child.progress;
     p.streak = 0;
     p.run = 0;
-    ui.touchProgress();
-    app.state.history.push({
+    ui.touchProgress(child);
+    child.history.push({
       id: U.uid(), ts: meta.ts || Date.now(), mode: 'challenge', topic: null, level: null,
-      size: app.state.settings.setSize, correct: (meta.items || []).filter(function (i) { return i.ok; }).length,
+      size: child.settings.setSize, correct: (meta.items || []).filter(function (i) { return i.ok; }).length,
       wrong: (meta.items || []).filter(function (i) { return !i.ok; }).length,
       perfect: false, completed: false, abandoned: true, items: meta.items || [],
     });
   }
 
   function startSession(mode, topicId, level) {
-    const st = app.state.settings;
+    const st = kid().settings;
     const pool = mode === 'challenge' ? E.poolFrom(st.assignment) : [{ topic: topicId, level: level }];
     if (!pool.length) return ui.show('home');
     app.session = {
@@ -344,7 +376,7 @@
       results: [],
       failed: false,
       ended: false,
-      setNo: Math.min(E.currentStreak(app.state) + 1, st.setsRequired),
+      setNo: Math.min(E.currentStreak(kid()) + 1, st.setsRequired),
       startedAt: Date.now(),
       locked: false,
     };
@@ -370,7 +402,7 @@
   screens.quiz = function () {
     const sess = app.session;
     if (!sess) return ui.show('home');
-    const st = app.state.settings;
+    const st = kid().settings;
     const q = sess.questions[sess.index];
     const size = sess.questions.length;
     const label = sess.mode === 'challenge'
@@ -467,7 +499,7 @@
   }
 
   function updateRun(ok) {
-    const p = app.state.progress;
+    const p = kid().progress;
     const today = E.dayKey();
     if (p.streakDay !== today) { p.streak = 0; p.streakDay = today; }
     if (ok) {
@@ -524,7 +556,7 @@
 
   function onWrong(sess, q, parsed) {
     SQ.sound.play('bad');
-    const st = app.state.settings;
+    const st = kid().settings;
     const card = doc.getElementById('qcard');
     if (card) card.classList.add('is-bad');
     const mark = doc.getElementById('qmark');
@@ -586,7 +618,7 @@
 
   function finishSet() {
     const sess = app.session;
-    const s = app.state, st = s.settings, p = s.progress;
+    const s = kid(), st = s.settings, p = s.progress;
     const h = recordSet(sess);
     app.session = null;
 
@@ -635,7 +667,7 @@
   }
 
   screens['set-done'] = function (args) {
-    const s = app.state, st = s.settings;
+    const s = kid(), st = s.settings;
     const streak = Math.min(E.currentStreak(s), st.setsRequired);
     const left = st.setsRequired - streak;
     set(
@@ -692,7 +724,7 @@
       '<p class="eyebrow">Unlocked</p>' +
       '<h1>Game time!</h1>' +
       '<p class="reward-mins"><b>' + r.minutes + '</b> minutes</p>' +
-      '<p class="lead">' + app.state.settings.setsRequired + ' perfect set' + (app.state.settings.setsRequired > 1 ? 's in a row' : '') +
+      '<p class="lead">' + kid().settings.setsRequired + ' perfect set' + (kid().settings.setsRequired > 1 ? 's in a row' : '') +
       '. That took real focus. Well done, ' + esc(childName()) + '!</p>' +
       '<div class="actions"><button class="btn primary big" data-act="start-timer">Start the timer now</button>' +
       '<button class="btn ghost" data-act="home">Save it for later</button></div></section>'
@@ -702,11 +734,12 @@
 
   /* ---------- game timer ---------- */
 
-  let lastRunning = null;
+  let lastRunning = null, lastChild = null;
   function tick() {
-    if (!app.state || !$chip) return;
+    const c = kid();
+    if (!c || !$chip) { if ($chip) $chip.hidden = true; lastRunning = null; return; }
     const now = Date.now();
-    const r = E.runningReward(app.state, now);
+    const r = E.runningReward(c, now);
     if (r) {
       $chip.hidden = false;
       $chip.innerHTML = ICON.pad + '<span>' + fmtTime(r.endsAt - now) + '</span>';
@@ -717,15 +750,18 @@
     doc.querySelectorAll('[data-timer]').forEach(function (el) {
       el.textContent = r ? fmtTime(r.endsAt - now) : '0:00';
     });
-    if (lastRunning && (!r || r.id !== lastRunning)) {
-      const prev = app.state.rewards.find(function (x) { return x.id === lastRunning; });
+    // Remember the state first: refresh() below calls tick() again.
+    const prevId = lastRunning, prevChild = lastChild;
+    lastRunning = r ? r.id : null;
+    lastChild = c.id;
+    if (prevId && prevChild === c.id && (!r || r.id !== prevId)) {
+      const prev = c.rewards.find(function (x) { return x.id === prevId; });
       if (prev && !prev.stoppedEarly && now - prev.endsAt < 5000) {
         SQ.sound.play('end');
         ui.toast('Game time is over! Great job today.');
       }
       if (app.screen && app.screen.name === 'home') ui.refresh();
     }
-    lastRunning = r ? r.id : null;
   }
 
   /* ---------- confetti ---------- */
@@ -771,7 +807,7 @@
   actions.topic = function (el) { ui.show('topic', { topic: el.dataset.topic }); };
   actions.practise = function (el) { startSession('practice', el.dataset.topic, Number(el.dataset.level)); };
   actions['start-challenge'] = function () {
-    if (!E.canEarnReward(app.state)) return ui.show('home');
+    if (!E.canEarnReward(kid())) return ui.show('home');
     startSession('challenge');
   };
   actions['new-set'] = function () {
@@ -809,7 +845,7 @@
   actions['quit-confirm'] = function () {
     const sess = app.session;
     if (sess) {
-      applyAbandoned({ ts: sess.startedAt, items: sess.results });
+      applyAbandoned(kid(), { ts: sess.startedAt, items: sess.results });
       markActiveSet(null);
       ui.commit();
     }
@@ -818,8 +854,8 @@
   };
 
   actions['start-timer'] = function () {
-    if (E.runningReward(app.state)) return ui.show('home');
-    const r = E.unusedRewards(app.state)[0];
+    if (E.runningReward(kid())) return ui.show('home');
+    const r = E.unusedRewards(kid())[0];
     if (!r) return ui.show('home');
     const now = Date.now();
     r.startedAt = now;
@@ -829,13 +865,45 @@
     ui.show('home');
   };
   actions['stop-timer'] = function () {
-    const r = E.runningReward(app.state);
+    const r = E.runningReward(kid());
     if (r) {
       r.endsAt = Date.now();
       r.stoppedEarly = true;
       r.updatedAt = Date.now();
       ui.commit();
     }
+    ui.show('home');
+  };
+
+  /* ---------- who's studying ---------- */
+
+  screens.who = function () {
+    const kids = SQ.family.children(app.state);
+    set(
+      '<section class="who-screen"><h1>Who\u2019s studying?</h1>' +
+      '<p class="muted">Pick your name.</p>' +
+      '<div class="who-grid">' + kids.map(function (c, i) {
+        const name = c.settings.childName || 'Child';
+        return '<button class="who-card" data-act="pick-child" data-id="' + esc(c.id) + '">' +
+          '<span class="avatar a' + (i % 4) + '" aria-hidden="true">' + esc(name.charAt(0).toUpperCase()) + '</span>' +
+          '<span class="who-name">' + esc(name) + '</span>' +
+          (c.settings.childPinHash ? '<span class="who-lock" title="PIN">' + ICON.lock + '</span>' : '') +
+          '</button>';
+      }).join('') + '</div></section>'
+    );
+  };
+
+  actions['switch-child'] = function () {
+    if (app.screen && app.screen.name === 'quiz') return;
+    if (SQ.family.children(app.state).length < 2) return;
+    app.session = null;
+    ui.show('who');
+  };
+  actions['pick-child'] = function (el) {
+    const c = SQ.family.child(app.state, el.dataset.id);
+    if (!c) return ui.show('who');
+    if (c.settings.childPinHash && c.id !== app.childId) return ui.show('pin', { mode: 'child', childId: c.id });
+    ui.selectChild(c.id);
     ui.show('home');
   };
 
@@ -871,13 +939,20 @@
   app.boot = function (rootEl) {
     buildShell(rootEl);
     app.state = SQ.storage.load();
+    app.childId = SQ.storage.getMeta('child');
+    if (!app.childId && app.state.children.some(function (c) { return c.id === 'main'; })) {
+      app.childId = 'main'; // upgraded from the one-child version
+    }
 
     const active = SQ.storage.getMeta('active');
-    if (active && app.state.settings.pinHash) {
-      applyAbandoned(active);
+    if (active) {
+      const c = SQ.family.child(app.state, active.childId || app.childId);
+      if (c) {
+        applyAbandoned(c, active);
+        SQ.storage.save(app.state);
+        SQ.sync.changed();
+      }
       markActiveSet(null);
-      SQ.storage.save(app.state);
-      SQ.sync.changed();
     }
 
     SQ.sync.bind(function () { return app.state; }, adopt);
@@ -890,10 +965,7 @@
     SQ.sync.init()
       .then(function (enabled) { return enabled && SQ.sync.family ? SQ.sync.pull() : null; })
       .catch(function () { return null; })
-      .then(function () {
-        if (!app.state.settings.pinHash) ui.show('setup', { join: join });
-        else ui.show('home');
-      });
+      .then(function () { ui.enter({ join: join }); });
 
     setInterval(tick, 1000);
     setInterval(function () {

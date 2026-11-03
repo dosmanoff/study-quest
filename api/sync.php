@@ -10,7 +10,7 @@
  *   GET  sync.php?family=CODE            -> {"ok":true,"rev":3,"state":{...}|null}
  *   POST sync.php?family=CODE  {baseRev, state}
  *        -> 200 {"ok":true,"rev":4}
- *        -> 409 {"ok":false,"error":"conflict","rev":4,"state":{...}}  (merge and retry)
+ *        -> 200 {"ok":false,"error":"conflict","rev":4,"state":{...}}  (merge and retry)
  *
  * Files are saved as api/data/<sha256>.php starting with "<?php exit; ?>",
  * so even a server that ignores .htaccess will never show their contents.
@@ -94,7 +94,8 @@ $rev = $rec ? (int) $rec->rev : 0;
 if ($rev !== $baseRev) {
     flock($lock, LOCK_UN);
     fclose($lock);
-    sq_reply(409, array('ok' => false, 'error' => 'conflict', 'rev' => $rev, 'state' => $rec ? $rec->state : null));
+    // A normal event (two devices saved at once): 200, so browsers don't log it as an error.
+    sq_reply(200, array('ok' => false, 'error' => 'conflict', 'rev' => $rev, 'state' => $rec ? $rec->state : null));
 }
 
 $new = array('rev' => $rev + 1, 'updated' => time(), 'state' => $in->state);
