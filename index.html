@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#2346d4">
+  <meta name="robots" content="noindex">
+  <title>Study Quest</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Bricolage+Grotesque:opsz,wght@12..96,600..800&family=Caveat:wght@600;700&display=swap">
+  <link rel="stylesheet" href="src/styles.css">
+</head>
+<body>
+  <div id="root"><noscript>Study Quest needs JavaScript turned on.</noscript></div>
+
+  <!-- Core -->
+  <script src="src/core/sq.js"></script>
+  <script src="src/core/storage.js"></script>
+  <script src="src/core/engine.js"></script>
+  <script src="src/core/sync.js"></script>
+
+  <!-- Subjects and topics: add new files here (see README.md) -->
+  <script src="src/subjects/maths/subject.js"></script>
+  <script src="src/subjects/maths/helpers.js"></script>
+  <script src="src/subjects/maths/times-tables.js"></script>
+  <script src="src/subjects/maths/negatives.js"></script>
+  <script src="src/subjects/maths/powers.js"></script>
+  <script src="src/subjects/maths/bidmas.js"></script>
+
+  <!-- Defaults and interface -->
+  <script src="src/config.js"></script>
+  <script src="src/ui/sound.js"></script>
+  <script src="src/ui/app.js"></script>
+  <script src="src/ui/parent.js"></script>
+  <script src="src/main.js"></script>
+</body>
+</html>

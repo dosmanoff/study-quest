@@ -1,0 +1,9 @@
+# build output and archives
+dist/
+*.zip
+node_modules/
+
+# data written by api/sync.php on the server
+api/data/*.php
+api/data/*.lock
+api/data/*.tmp
