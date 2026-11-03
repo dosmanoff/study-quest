@@ -25,7 +25,10 @@
   let adopt = function () {};
   let pushing = false, dirty = false, timer = null;
 
-  function endpoint() { return (SQ.config && SQ.config.syncUrl) || 'api/sync.php'; }
+  /** null means this copy of the site has no sync server (e.g. GitHub Pages). */
+  function endpoint() {
+    return SQ.config && Object.prototype.hasOwnProperty.call(SQ.config, 'syncUrl') ? SQ.config.syncUrl : 'api/sync.php';
+  }
 
   function setStatus(s) {
     S.status = s;
@@ -79,6 +82,11 @@
     const meta = SQ.storage.getMeta('sync') || {};
     S.family = meta.family || null;
     S.rev = meta.rev || 0;
+    if (!endpoint()) {
+      S.enabled = false;
+      setStatus('off');
+      return Promise.resolve(false);
+    }
     setStatus('checking');
     return request('GET', 'ping=1', null, 6000).then(function (r) {
       S.enabled = !!(r.data && r.data.ok && r.data.app === 'studyquest');

@@ -8,6 +8,7 @@
 
   SQ.config = {
     // Where the sync script lives, relative to index.html.
+    // The GitHub Pages build sets this to null (no server there).
     syncUrl: 'api/sync.php',
   };
 
