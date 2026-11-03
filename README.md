@@ -42,13 +42,13 @@
 1. Создайте проект на https://console.firebase.google.com.
 2. Build → **Firestore Database** → **Create database**. Location: `europe-west2 (London)`, режим **Production**.
 3. Вкладка **Rules**: вставьте содержимое `firebase/firestore.rules` и нажмите **Publish**.
-4. ⚙ → **Project settings** → **Your apps** → значок **</>**. Зарегистрируйте веб-приложение без Hosting и скопируйте `apiKey` и `projectId` в `src/config.js`:
+4. Впишите идентификатор проекта (⚙ → **Project settings** → Project ID) в `src/config.js`:
 
    ```js
-   firebase: { projectId: 'study-quest-1b14b', apiKey: 'AIza…' },
+   firebase: { projectId: 'study-quest-1b14b' },
    ```
 
-   Эти значения не секретные: доступ к данным ограничивают правила из шага 3. Каждая семья хранится в документе `families/<sha256 от кода семьи>`. Без кода документ не найти, а просматривать список документов правила запрещают.
+   API-ключ не нужен: сайт обращается к Firestore напрямую, а доступ к данным ограничивают правила из шага 3. Каждая семья хранится в документе `families/<sha256 от кода семьи>`. Без кода документ не найти, а просматривать список документов правила запрещают.
 
 5. Отправьте изменения в `main`, и GitHub Pages обновится сам.
 

@@ -8,10 +8,10 @@
 
   SQ.config = {
     // Shared progress between devices through Google Cloud Firestore.
-    // Values from Firebase console -> Project settings -> Your apps (web app).
-    // These are public identifiers, not secrets: the Firestore rules in the
-    // README decide what can be read or written. null = not used.
-    firebase: null,
+    // projectId from Firebase console -> Project settings. An apiKey can be
+    // added but isn't needed: the Firestore rules (firebase/firestore.rules)
+    // decide what can be read or written. null = not used.
+    firebase: { projectId: 'study-quest-1b14b' },
 
     // Alternative for PHP hosting: where the sync script lives, relative to
     // index.html. Used only when firebase is null. The GitHub Pages build sets

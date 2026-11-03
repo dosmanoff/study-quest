@@ -184,6 +184,8 @@
   }
 
   function pickBackend() {
+    // A page opened from a file can't reach any server.
+    if (!root.location || !/^https?:$/.test(root.location.protocol)) return null;
     const c = SQ.config || {};
     if (c.firebase && c.firebase.projectId) return firebaseBackend(c.firebase);
     const php = Object.prototype.hasOwnProperty.call(c, 'syncUrl') ? c.syncUrl : 'api/sync.php';
