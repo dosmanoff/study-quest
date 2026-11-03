@@ -2,7 +2,8 @@
 //
 //   node build.mjs
 //
-// dist/site/            -> upload this folder to the hosting (index.html + api/)
+// dist/site/            -> upload this folder to PHP hosting (index.html + api/)
+// dist/pages/           -> GitHub Pages version (no server, no sync)
 // dist/study-quest.html -> the same app as one file (works offline, no sync)
 // dist/artifact.html    -> page body for a claude.ai artifact preview
 import { readFileSync, writeFileSync, mkdirSync, rmSync, cpSync, existsSync } from 'node:fs';
@@ -33,21 +34,29 @@ const head = (extra = '') => `<meta charset="utf-8">
 ${css}
 </style>`;
 
-const body = `<div id="root"><noscript>Study Quest needs JavaScript turned on.</noscript></div>
+const bodyWith = (code) => `<div id="root"><noscript>Study Quest needs JavaScript turned on.</noscript></div>
 <script>
-${js}
+${code}
 </script>`;
+const body = bodyWith(js);
 
-const full = `<!doctype html>
+// GitHub Pages has no PHP, so that build never asks for the sync server.
+const SYNC_LINE = "syncUrl: 'api/sync.php',";
+if (js.split(SYNC_LINE).length !== 2) throw new Error('syncUrl line not found exactly once in config.js');
+const jsNoSync = js.replace(SYNC_LINE, 'syncUrl: null,');
+
+const page = (b) => `<!doctype html>
 <html lang="en">
 <head>
 ${head()}
 </head>
 <body>
-${body}
+${b}
 </body>
 </html>
 `;
+const full = page(body);
+const pages = page(bodyWith(jsNoSync));
 
 // Artifact pages get their own document skeleton, so only the content goes in.
 const artifact = `<title>Study Quest</title>
@@ -62,6 +71,9 @@ ${body}
 const dist = join(here, 'dist');
 rmSync(dist, { recursive: true, force: true });
 mkdirSync(join(dist, 'site'), { recursive: true });
+mkdirSync(join(dist, 'pages'), { recursive: true });
+writeFileSync(join(dist, 'pages', 'index.html'), pages);
+writeFileSync(join(dist, 'pages', '.nojekyll'), '');
 writeFileSync(join(dist, 'study-quest.html'), full);
 writeFileSync(join(dist, 'artifact.html'), artifact);
 writeFileSync(join(dist, 'site', 'index.html'), full);
@@ -73,5 +85,6 @@ if (!existsSync(join(dist, 'site', 'api', 'data', '.htaccess'))) throw new Error
 
 console.log(`Built ${scripts.length} scripts, ${(full.length / 1024).toFixed(0)} KB:`);
 console.log('  dist/site/ (index.html + api/)');
+console.log('  dist/pages/ (GitHub Pages)');
 console.log('  dist/study-quest.html');
 console.log('  dist/artifact.html');
