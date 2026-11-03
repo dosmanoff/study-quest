@@ -8,7 +8,7 @@
  * State of one family (schema 2):
  *   {
  *     schema: 2,
- *     family:   { pinHash, updatedAt },   // parent PIN
+ *     family:   { pinHash, homeAssistant, updatedAt },   // parent PIN, HA link on/off
  *     children: [child, ...]
  *   }
  *   child = { id, createdAt, deletedAt, settings, progress, history, rewards, resetAt }
@@ -69,7 +69,7 @@
   }
 
   function blankState() {
-    return { schema: 2, family: { pinHash: null, updatedAt: 0 }, children: [] };
+    return { schema: 2, family: { pinHash: null, homeAssistant: false, updatedAt: 0 }, children: [] };
   }
 
   /** Keep only assignment entries whose topic and levels still exist. */
@@ -117,7 +117,7 @@
     if (!raw || typeof raw !== 'object') return s;
     if (raw.schema !== 2 && raw.settings) {
       // Version 1 had one child and the parent PIN in settings.
-      s.family = { pinHash: raw.settings.pinHash || null, updatedAt: raw.settings.updatedAt || 0 };
+      s.family = { pinHash: raw.settings.pinHash || null, homeAssistant: false, updatedAt: raw.settings.updatedAt || 0 };
       if (raw.settings.pinHash) {
         const c = normaliseChild(Object.assign({}, raw, { id: 'main' }));
         c.createdAt = 1;
@@ -127,6 +127,7 @@
     }
     s.family = {
       pinHash: (raw.family && raw.family.pinHash) || null,
+      homeAssistant: !!(raw.family && raw.family.homeAssistant),
       updatedAt: (raw.family && Number(raw.family.updatedAt)) || 0,
     };
     s.children = Array.isArray(raw.children) ? raw.children.filter(Boolean).map(normaliseChild) : [];

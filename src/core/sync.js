@@ -18,6 +18,9 @@
  *   put(code, baseRev, state)     -> { ok: true, rev } | { conflict: true, rev, state }
  * A put only succeeds if nobody else saved since baseRev; otherwise the device
  * merges with the newer copy and tries again.
+ *
+ * With Firebase, when the parent turns on the Home Assistant link, each save
+ * is followed by a small summary in ha/<same id> (see homeassistant.js).
  */
 (function (root) {
   'use strict';
@@ -32,6 +35,8 @@
     family: null,
     rev: 0,
     lastSync: 0,
+    /** Home Assistant summary: 'off' | 'waiting' | 'ok' | 'refused' (rules missing) | 'error' */
+    ha: 'off',
   });
 
   const listeners = [];
@@ -106,8 +111,9 @@
    * require rev to go up by exactly one.
    */
   function firebaseBackend(cfg) {
-    const base = (cfg.baseUrl || 'https://firestore.googleapis.com/v1') + '/projects/' +
-      encodeURIComponent(cfg.projectId) + '/databases/(default)/documents/families/';
+    const root_ = (cfg.baseUrl || 'https://firestore.googleapis.com/v1') + '/projects/' +
+      encodeURIComponent(cfg.projectId) + '/databases/(default)/documents/';
+    const base = root_ + 'families/';
     const times = {}; // code -> updateTime of the copy we last saw
     const ids = {};
 
@@ -145,8 +151,28 @@
       return get(code).then(function (cur) { return { conflict: true, rev: cur.rev, state: cur.state }; });
     }
 
+    function haUrl(id, params) {
+      const q = [];
+      if (cfg.apiKey) q.push('key=' + encodeURIComponent(cfg.apiKey));
+      Object.keys(params || {}).forEach(function (k) { q.push(k + '=' + encodeURIComponent(params[k])); });
+      return root_ + 'ha/' + id + (q.length ? '?' + q.join('&') : '');
+    }
+
     return {
       name: 'firebase',
+      /** Address Home Assistant reads (no key needed). */
+      haUrl: function (code) {
+        return docId(code).then(function (id) { return root_ + 'ha/' + id; });
+      },
+      /** Save the Home Assistant summary. Resolves 'ok' or 'refused'. */
+      writeHa: function (code, game) {
+        const body = { fields: { game: { stringValue: game }, updated: { integerValue: String(Date.now()) } } };
+        return docId(code).then(function (id) { return fetchJson('PATCH', haUrl(id), body); }).then(function (r) {
+          if (r.status === 200) return 'ok';
+          if (r.status === 403) return 'refused';
+          throw new Error('ha write failed: ' + r.status);
+        });
+      },
       ping: function () {
         // A made-up document: "not found" means the database is there and readable.
         return fetchJson('GET', url(new Array(65).join('0')), null, 8000).then(function (r) {
@@ -291,6 +317,7 @@
     push(getState(), 0).then(function (saved) {
       adopt(SQ.storage.merge(getState(), saved));
       setStatus('ok');
+      writeHa(getState(), false);
     }).catch(function () {
       dirty = true;
       setStatus('offline');
@@ -305,6 +332,45 @@
     if (timer) clearTimeout(timer);
     timer = setTimeout(flush, ms);
   }
+
+  /* ---------- Home Assistant summary ---------- */
+
+  let haSent = null, haBusy = false;
+
+  function setHa(st) {
+    if (S.ha === st) return;
+    S.ha = st;
+    listeners.forEach(function (fn) { try { fn(S.status); } catch (e) { /* ignore */ } });
+  }
+
+  /** Write the summary if the link is on and it changed (force: write anyway). */
+  function writeHa(state, force) {
+    if (!backend || !backend.writeHa || !S.family || !state) { setHa('off'); return Promise.resolve(); }
+    const on = !!state.family.homeAssistant;
+    if (!on && !force) { setHa('off'); return Promise.resolve(); }
+    const game = on ? SQ.ha.summary(state) : JSON.stringify({ v: 1, children: {}, off: true });
+    if (!force && game === haSent) return Promise.resolve();
+    if (haBusy) return Promise.resolve();
+    haBusy = true;
+    if (on && S.ha !== 'ok') setHa('waiting');
+    return backend.writeHa(S.family, game).then(function (res) {
+      if (res === 'ok') haSent = game;
+      setHa(on ? (res === 'ok' ? 'ok' : 'refused') : 'off');
+    }).catch(function () {
+      setHa(on ? 'error' : 'off');
+    }).then(function () { haBusy = false; });
+  }
+
+  /** Can this family be linked to Home Assistant (Firebase only)? */
+  S.haAvailable = function () { return !!(backend && backend.writeHa && S.family); };
+
+  /** The address Home Assistant should read. Resolves null when not available. */
+  S.haUrl = function () {
+    return S.haAvailable() ? backend.haUrl(S.family) : Promise.resolve(null);
+  };
+
+  /** Write the summary now (after turning the link on or off). */
+  S.writeHaNow = function () { return writeHa(getState(), true); };
 
   /** Call after every local change. */
   S.changed = function () {

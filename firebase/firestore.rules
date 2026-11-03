@@ -17,5 +17,16 @@ service cloud.firestore {
         && d.rev is int && d.updated is int
         && d.state is string && d.state.size() < 900000;
     }
+
+    // Home Assistant: a tiny game-time summary per family, same id.
+    match /ha/{familyId} {
+      allow get: if familyId.matches('^[0-9a-f]{64}$');
+      allow list, delete: if false;
+      allow create, update: if familyId.matches('^[0-9a-f]{64}$')
+        && request.resource.data.keys().hasOnly(['game', 'updated'])
+        && request.resource.data.game is string
+        && request.resource.data.game.size() < 20000
+        && request.resource.data.updated is int;
+    }
   }
 }

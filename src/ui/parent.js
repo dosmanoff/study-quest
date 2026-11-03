@@ -652,11 +652,83 @@
       '<li>With several children, the device asks who is using it. Each device remembers the choice.</li>' +
       '<li>To follow progress from your own phone, connect it the same way, then open For parents.</li></ol>' +
       '<p class="muted small">The code works like a password to your family’s progress. Don’t share it publicly.</p></section>' +
+      haSection() +
       '<section class="p-sec"><h2>Disconnect this device</h2><p class="muted">The data on this device stays, but it stops syncing.</p>' +
       '<button class="btn ghost" data-act="sync-leave">Turn off sync here</button></section>';
   }
 
+  /* Home Assistant: unlock games only while game time runs (Firebase only). */
+  function haSection() {
+    if (!SQ.sync.haAvailable()) return '';
+    const on = !!app.state.family.homeAssistant;
+    if (!on) {
+      return '<section class="p-sec" id="ha-sec"><h2>Home Assistant</h2>' +
+        '<p>Home Assistant can keep games blocked through Microsoft Family Safety and unlock them only while your child’s game timer is running.</p>' +
+        '<p class="muted small">Before turning this on, add the Home Assistant part of the Firestore rules (README → Home Assistant). The link then works for every child in the family.</p>' +
+        '<button class="btn" data-act="ha-on">Turn on the Home Assistant link</button></section>';
+    }
+    const st = SQ.sync.ha;
+    const pill = st === 'ok' ? '<span class="pill good">summary up to date</span>'
+      : st === 'refused' ? '<span class="pill bad">Firestore refused the summary</span>'
+      : st === 'error' ? '<span class="pill warn">can’t reach Firestore, will retry</span>'
+      : '<span class="pill plain">sending the summary…</span>';
+    return '<section class="p-sec" id="ha-sec"><h2>Home Assistant</h2>' +
+      '<p>' + pill + '</p>' +
+      (st === 'refused'
+        ? '<p class="notice">The Firestore rules don’t include the Home Assistant part yet. Paste the full rules from the README (or <code>firebase/firestore.rules</code>) into Firebase → Firestore → Rules and click Publish, then reload this page.</p>'
+        : '') +
+      '<p>Copy this into Home Assistant as <code>/config/packages/study_quest.yaml</code>, then replace the <code>CHANGE_ME</code> lines with your Family Safety switches. The README has the steps.</p>' +
+      '<textarea id="ha-yaml" class="code-area tall" readonly aria-label="Home Assistant package">Preparing…</textarea>' +
+      '<div class="btn-row"><button class="btn" data-act="ha-copy">Copy for Home Assistant</button>' +
+      '<button class="btn ghost" data-act="ha-off">Turn off the link</button></div></section>';
+  }
+
+  function fillHaYaml() {
+    const box = $('ha-yaml');
+    if (!box) return;
+    SQ.sync.haUrl().then(function (url) {
+      if (!url) return;
+      box.value = SQ.ha.packageYaml(url, kids().map(function (c) { return { id: c.id, name: c.settings.childName }; }));
+    });
+  }
+
+  // Keep the status pill fresh while the Devices tab is open.
+  let haShown = null;
+  SQ.sync.onChange(function () {
+    if (!app.screen || app.screen.name !== 'parent' || app.screen.args.tab !== 'devices') return;
+    if (haShown === SQ.sync.ha) return;
+    const sec = $('ha-sec');
+    if (!sec) return;
+    haShown = SQ.sync.ha;
+    sec.outerHTML = haSection();
+    fillHaYaml();
+  });
+
+  actions['ha-on'] = function () {
+    app.state.family.homeAssistant = true;
+    ui.touchFamily();
+    ui.commit();
+    SQ.sync.writeHaNow();
+    ui.show('parent', { tab: 'devices' });
+  };
+  actions['ha-off'] = function () {
+    app.state.family.homeAssistant = false;
+    ui.touchFamily();
+    ui.commit();
+    SQ.sync.writeHaNow();
+    ui.show('parent', { tab: 'devices' });
+    ui.toast('Home Assistant link is off');
+  };
+  actions['ha-copy'] = function () {
+    const box = $('ha-yaml');
+    box.select();
+    copy(box.value, 'Copied. Paste it into Home Assistant');
+  };
+
   bind.devices = function () {
+    haShown = SQ.sync.ha;
+    if (app.state.family.homeAssistant && SQ.sync.haAvailable() && SQ.sync.ha === 'off') SQ.sync.writeHaNow();
+    fillHaYaml();
     const f = $('join2-form');
     if (!f) return;
     const inp = $('join2-code');

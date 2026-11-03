@@ -28,8 +28,10 @@ const URL = `http://localhost:${PORT}/study-quest/`;
 
 /* ---------- Firestore imitation ---------- */
 const docs = new Map();
+const haDocs = new Map();
+let haRefuse = false; // like a database whose rules don't have the Home Assistant part yet
 let tick = 0;
-const stats = { get: 0, patch: 0, conflicts: 0, denied: 0, bad: 0 };
+const stats = { get: 0, patch: 0, conflicts: 0, denied: 0, bad: 0, ha: 0 };
 let refuseAll = false;
 const now = () => `2026-11-03T12:00:00.${String(++tick).padStart(6, '0')}Z`;
 const cors = { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET, PATCH, OPTIONS', 'access-control-allow-headers': 'content-type' };
@@ -40,6 +42,22 @@ async function firestore(route) {
   const req = route.request();
   if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors });
   const u = new globalThis.URL(req.url());
+  const h = u.pathname.match(/^\/v1\/projects\/([^/]+)\/databases\/\(default\)\/documents\/ha\/([^/]+)$/);
+  if (h) {
+    if (h[1] !== PROJECT || u.searchParams.get('key') !== KEY) { stats.bad++; return error(route, 400, 'INVALID_ARGUMENT', 'bad'); }
+    const id = decodeURIComponent(h[2]);
+    const ok = /^[0-9a-f]{64}$/.test(id);
+    if (req.method() === 'GET') return haDocs.has(id) ? reply(route, 200, haDocs.get(id)) : error(route, 404, 'NOT_FOUND', 'nope');
+    if (req.method() !== 'PATCH') return error(route, 400, 'INVALID_ARGUMENT', 'method');
+    const f = JSON.parse(req.postData() || '{}').fields || {};
+    const valid = ok && !haRefuse && Object.keys(f).every((k) => ['game', 'updated'].includes(k)) &&
+      f.game && typeof f.game.stringValue === 'string' && f.game.stringValue.length < 20000 && f.updated && 'integerValue' in f.updated;
+    if (!valid) { stats.denied++; return error(route, 403, 'PERMISSION_DENIED', 'Missing or insufficient permissions.'); }
+    stats.ha++;
+    const t = now();
+    haDocs.set(id, { name: 'ha/' + id, fields: f, createTime: t, updateTime: t });
+    return reply(route, 200, haDocs.get(id));
+  }
   const m = u.pathname.match(/^\/v1\/projects\/([^/]+)\/databases\/\(default\)\/documents\/families\/([^/]+)$/);
   if (!m || m[1] !== PROJECT) { stats.bad++; return error(route, 404, 'NOT_FOUND', 'bad path ' + u.pathname); }
   if (u.searchParams.get('key') !== KEY) { stats.bad++; return error(route, 400, 'INVALID_ARGUMENT', 'API key not valid'); }
@@ -175,6 +193,47 @@ try {
   await shot(A, '02-pc-parent-devices');
   step('parent panel on the PC shows the phone\'s practice');
 
+  /* Home Assistant link: off by default, refused while the rules lack it, then on */
+  const haGame = () => { const d = [...haDocs.values()][0]; return d ? JSON.parse(d.fields.game.stringValue) : null; };
+  assert.equal(stats.ha, 0, 'no summary is written until the parent turns the link on');
+  assert.ok(await A.isVisible('[data-act="ha-on"]'));
+  haRefuse = true;
+  await A.click('[data-act="ha-on"]');
+  await A.waitForSelector('#ha-sec .pill.bad');
+  assert.ok((await A.textContent('#ha-sec')).includes('rules don’t include the Home Assistant part'));
+  await settled(A);
+  assert.equal(await A.evaluate(() => window.SQ.app.state.family.homeAssistant), true);
+  haRefuse = false;
+  await A.evaluate(() => window.SQ.sync.writeHaNow());
+  await A.waitForSelector('#ha-sec .pill.good');
+  const yamlText = await A.inputValue('#ha-yaml');
+  const [haId] = haDocs.keys();
+  assert.equal(haId, docId, 'the summary uses the same hashed id as the family');
+  assert.ok(yamlText.includes(`/documents/ha/${haId}`), 'the package reads the summary document');
+  assert.ok(yamlText.includes('binary_sensor.study_quest_sam_game_time'));
+  const samId = await A.evaluate(() => window.SQ.ui.kid().id);
+  assert.deepEqual(haGame().children[samId], { name: 'Sam', until: 0, saved: 0 });
+  await shot(A, '03-pc-home-assistant');
+  step('Home Assistant link: refused without the rules, then on; package shows the right document');
+
+  /* The phone starts game time -> the summary says until when; stopping clears it */
+  await B.evaluate(() => window.SQ.sync.pull());
+  await B.waitForFunction(() => window.SQ.app.state.family.homeAssistant === true);
+  const endsAt = await B.evaluate(() => {
+    const c = window.SQ.ui.kid(), t = Date.now();
+    c.rewards.push({ id: 'r-test', ts: t, minutes: 30, startedAt: t, endsAt: t + 30 * 60000, updatedAt: t });
+    window.SQ.ui.commit();
+    window.SQ.ui.show('home');
+    return t + 30 * 60000;
+  });
+  await B.waitForFunction(() => window.SQ.sync.ha === 'ok', null, { timeout: 15000 });
+  await B.waitForTimeout(500);
+  assert.equal(haGame().children[samId].until, endsAt, 'summary carries the end of the running timer');
+  await B.click('[data-act="stop-timer"]');
+  await B.waitForTimeout(3000);
+  assert.equal(haGame().children[samId].until, 0, 'stopping the timer clears it for Home Assistant');
+  step('starting and stopping game time on the phone updates the Home Assistant summary');
+
   /* A wrong code and a refused database are handled */
   const C = await open({ viewport: { width: 420, height: 860 } }, 'Tablet');
   await C.goto(URL);
@@ -194,7 +253,7 @@ try {
   assert.equal(stats.bad, 0, 'every request used the right project, path and key');
   await browser.close();
   assert.deepEqual(errors.filter((e) => !/status of (403|404|409|400)/.test(e)), [], 'no page errors');
-  console.log(`\nOK: Firestore sync passed. Requests: ${stats.get} reads, ${stats.patch} writes, ${stats.conflicts} conflicts, ${stats.denied} refused.`);
+  console.log(`\nOK: Firestore sync passed. Requests: ${stats.get} reads, ${stats.patch} writes, ${stats.conflicts} conflicts, ${stats.denied} refused, ${stats.ha} Home Assistant summaries.`);
 } catch (e) {
   console.error(e);
   if (errors.length) console.error('Page errors:\n' + errors.join('\n'));
