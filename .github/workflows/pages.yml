@@ -27,6 +27,10 @@ jobs:
           node-version: 20
       - name: Check every topic's questions
         run: node tests/generators.test.mjs
+      - name: Check the Home Assistant package
+        run: |
+          pip install --quiet jinja2 pyyaml
+          python3 tests/homeassistant_test.py
       - name: Build
         run: node build.mjs
       - uses: actions/upload-pages-artifact@v3

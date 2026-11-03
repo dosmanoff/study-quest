@@ -497,6 +497,7 @@ input:not([type]), input[type="text"], input[type="password"], select, textarea 
 input:not(.blank):focus, select:focus, textarea:focus { outline: none; border-color: var(--biro); box-shadow: 0 0 0 3px var(--biro-soft); }
 .code-input { font-family: var(--font-body); font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; }
 .code-area { min-height: 110px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.8rem; resize: vertical; }
+.code-area.tall { min-height: 260px; white-space: pre; overflow: auto; }
 .radio, .check { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; padding: 6px 0; }
 .radio input, .check input { width: 20px; height: 20px; margin: 2px 0 0; accent-color: var(--biro); flex: none; }
 .form-err { color: var(--pen); font-weight: 700; min-height: 1.2em; }
@@ -530,6 +531,7 @@ input:not(.blank):focus, select:focus, textarea:focus { outline: none; border-co
 .explain { background: var(--surface-2); border-radius: var(--r-sm); padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; }
 .explain p { max-width: 70ch; }
 .p-sec { display: flex; flex-direction: column; gap: 10px; }
+.p-sec > .btn { align-self: flex-start; }
 .table-wrap { overflow-x: auto; }
 .stats { border-collapse: collapse; width: 100%; min-width: 440px; }
 .stats th { text-align: left; font-size: 0.82rem; color: var(--ink-3); font-weight: 700; padding: 6px 8px; border-bottom: 1px solid var(--rule); }
