@@ -126,7 +126,8 @@
           S.lastSync = Date.now();
           return state;
         }
-        if (r.status === 409 && r.data && attempt < 4) {
+        const conflict = r.data && (r.status === 409 || r.data.error === 'conflict');
+        if (conflict && attempt < 4) {
           S.rev = r.data.rev || 0;
           const merged = SQ.storage.merge(state, r.data.state);
           return push(merged, attempt + 1);

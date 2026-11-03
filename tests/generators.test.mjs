@@ -160,34 +160,89 @@ assert.equal(SQ.maths.solveSeq([{ n: 9 }, '−', { n: -20 }]).value, 29);
 /* ---- merging two devices ---- */
 const plain = (x) => JSON.parse(JSON.stringify(x));
 const S = SQ.storage;
+// the same child seen by two devices
+const kidA = S.blankChild('Old', 'k1'), kidB = S.blankChild('New', 'k1');
+kidA.createdAt = 1; kidB.createdAt = 1;
+kidA.settings.updatedAt = 100; kidB.settings.updatedAt = 200;
+kidA.history.push({ id: 'h1', ts: 10, items: [] }, { id: 'h2', ts: 30, items: [] });
+kidB.history.push({ id: 'h2', ts: 30, items: [] }, { id: 'h3', ts: 20, items: [] });
+kidA.rewards.push({ id: 'r1', ts: 5, minutes: 30, startedAt: null, updatedAt: 5 });
+kidB.rewards.push({ id: 'r1', ts: 5, minutes: 30, startedAt: 50, endsAt: 99, updatedAt: 50 });
+kidA.progress = { streak: 1, streakDay: 'x', run: 3, bestRun: 9, updatedAt: 300 };
+kidB.progress = { streak: 0, streakDay: 'x', run: 0, bestRun: 12, updatedAt: 200 };
 const a = S.blank(), b = S.blank();
-a.settings.childName = 'Old'; a.settings.updatedAt = 100;
-b.settings.childName = 'New'; b.settings.updatedAt = 200; b.settings.pinHash = null;
-a.settings.pinHash = 'abc';
-a.history.push({ id: 'h1', ts: 10, items: [] }, { id: 'h2', ts: 30, items: [] });
-b.history.push({ id: 'h2', ts: 30, items: [] }, { id: 'h3', ts: 20, items: [] });
-a.rewards.push({ id: 'r1', ts: 5, minutes: 30, startedAt: null, updatedAt: 5 });
-b.rewards.push({ id: 'r1', ts: 5, minutes: 30, startedAt: 50, endsAt: 99, updatedAt: 50 });
-a.progress = { streak: 1, streakDay: 'x', run: 3, bestRun: 9, updatedAt: 300 };
-b.progress = { streak: 0, streakDay: 'x', run: 0, bestRun: 12, updatedAt: 200 };
+a.family = { pinHash: 'abc', updatedAt: 100 };
+b.family = { pinHash: null, updatedAt: 200 };
+a.children.push(kidA);
+b.children.push(kidB);
+// a second child that only device B knows about
+const kid2 = S.blankChild('Alex', 'k2'); kid2.createdAt = 2;
+b.children.push(kid2);
+
 const m = S.merge(a, b);
-assert.equal(m.settings.childName, 'New');
-assert.equal(m.settings.pinHash, 'abc', 'PIN must survive a merge');
-assert.deepEqual(plain(m.history.map((h) => h.id)), ['h1', 'h3', 'h2']);
-assert.equal(m.rewards.length, 1);
-assert.equal(m.rewards[0].startedAt, 50);
-assert.equal(m.progress.streak, 1);
-assert.equal(m.progress.bestRun, 12);
-assert.deepEqual(JSON.parse(JSON.stringify(S.merge(m, m))), JSON.parse(JSON.stringify(m)), 'merge is idempotent');
+assert.equal(m.family.pinHash, 'abc', 'parent PIN must survive a merge');
+assert.deepEqual(plain(m.children.map((c) => c.id)), ['k1', 'k2'], 'children joined by id');
+const k1 = SQ.family.child(m, 'k1');
+assert.equal(k1.settings.childName, 'New');
+assert.deepEqual(plain(k1.history.map((h) => h.id)), ['h1', 'h3', 'h2']);
+assert.equal(k1.rewards.length, 1);
+assert.equal(k1.rewards[0].startedAt, 50);
+assert.equal(k1.progress.streak, 1);
+assert.equal(k1.progress.bestRun, 12);
+assert.deepEqual(plain(S.merge(m, m)), plain(m), 'merge is idempotent');
+assert.deepEqual(plain(S.merge(b, a)), plain(S.merge(a, b)), 'merge order does not matter');
+
 // a reset on one device wins over old history on another
-const c = S.merge(m, { ...S.blank(), resetAt: 25, settings: { ...m.settings } });
-assert.deepEqual(plain(c.history.map((h) => h.id)), ['h2']);
-assert.equal(c.rewards.length, 0);
+const r = plain(m);
+r.children[0].resetAt = 25;
+const c = S.merge(m, r);
+assert.deepEqual(plain(SQ.family.child(c, 'k1').history.map((h) => h.id)), ['h2']);
+assert.equal(SQ.family.child(c, 'k1').rewards.length, 0);
+assert.equal(SQ.family.child(c, 'k2').history.length, 0);
+
+// deleting a child on one device removes it everywhere
+const d = plain(m);
+d.children[1].deletedAt = 500;
+const md = S.merge(m, d);
+assert.equal(SQ.family.children(md).length, 1);
+assert.equal(SQ.family.child(md, 'k2'), null);
+assert.equal(SQ.family.isSetUp(md), true);
+
+// a child's PIN never leaks into the parent PIN and vice versa
+const withPin = plain(m);
+withPin.children[0].settings.childPinHash = 'kidpin';
+withPin.children[0].settings.updatedAt = 999;
+const mp = S.merge(m, withPin);
+assert.equal(SQ.family.child(mp, 'k1').settings.childPinHash, 'kidpin');
+assert.equal(mp.family.pinHash, 'abc');
+
+// upgrade from the one-child version (schema 1)
+const v1 = {
+  schema: 1,
+  settings: { childName: 'Sam', pinHash: 'p1', setSize: 8, updatedAt: 50, assignment: [{ topic: 'maths.powers', levels: [1] }] },
+  progress: { streak: 1, streakDay: 'x', run: 2, bestRun: 5, updatedAt: 60 },
+  history: [{ id: 'old', ts: 40, items: [] }],
+  rewards: [],
+};
+const up = S.normalise(v1);
+assert.equal(up.schema, 2);
+assert.equal(up.family.pinHash, 'p1');
+assert.equal(up.children.length, 1);
+assert.equal(up.children[0].id, 'main', 'stable id, so two upgraded devices merge into one child');
+assert.equal(up.children[0].settings.childName, 'Sam');
+assert.equal(up.children[0].settings.setSize, 8);
+assert.equal(up.children[0].settings.pinHash, undefined);
+assert.equal(up.children[0].history.length, 1);
+assert.equal(S.merge(S.normalise(v1), S.normalise(v1)).children.length, 1);
+assert.equal(S.normalise({ schema: 1, settings: { pinHash: null } }).children.length, 0, 'never set up');
+assert.equal(SQ.family.isSetUp(S.blank()), false);
+assert.ok(S.parseBackup(JSON.stringify(v1)).children.length === 1, 'old backups can be restored');
+
 // unknown topics in a saved assignment are dropped, empty falls back to defaults
-const n = S.normalise({ settings: { assignment: [{ topic: 'maths.nope', levels: [1] }, { topic: 'maths.powers', levels: [1, 9] }] } });
-assert.deepEqual(JSON.parse(JSON.stringify(n.settings.assignment)), [{ topic: 'maths.powers', levels: [1] }]);
-const n2 = S.normalise({ settings: { assignment: [] } });
-assert.ok(n2.settings.assignment.length > 0);
+const n = S.normalise({ schema: 2, family: {}, children: [{ id: 'x', settings: { assignment: [{ topic: 'maths.nope', levels: [1] }, { topic: 'maths.powers', levels: [1, 9] }] } }] });
+assert.deepEqual(plain(n.children[0].settings.assignment), [{ topic: 'maths.powers', levels: [1] }]);
+const n2 = S.normalise({ schema: 2, family: {}, children: [{ id: 'y', settings: { assignment: [] } }] });
+assert.ok(n2.children[0].settings.assignment.length > 0);
 
 console.log(summary.join('\n'));
 console.log(`\nOK: ${total} generated questions checked, plus engine, parser and merge tests.`);
