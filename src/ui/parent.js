@@ -78,7 +78,11 @@
       '<h1>Set up Study Quest</h1>' +
       '<p class="muted">Your child solves sets of questions. A few perfect sets in a row, with no mistakes at all, unlock time for computer games.</p>' +
       seg + (mode === 'join' ? formJoin : formNew) +
-      (!syncOn ? '<p class="notice">This copy of the site has no sync server, so progress is kept in this browser only. To share progress between a phone and a computer, put the site on hosting with PHP (see the README).</p>' : '') +
+      (!syncOn
+        ? (SQ.sync.backend === 'firebase'
+          ? '<p class="notice">Can’t reach the sync service right now, so the option to join a family is hidden. Check the internet connection and reload the page.</p>'
+          : '<p class="notice">This copy of the site has no sync server, so progress is kept in this browser only. To share progress between a phone and a computer, set up sync (see the README).</p>')
+        : '') +
       '</section>'
     );
 
@@ -614,6 +618,10 @@
 
   function devicesTab(args) {
     const S = SQ.sync;
+    if (!S.enabled && !S.family && S.backend === 'firebase') {
+      return '<div class="explain"><p><b>Can’t reach the sync service right now.</b> Check the internet connection and reload the page.</p>' +
+        '<p>Until then, progress is kept on this device and is shared once the connection is back.</p></div>';
+    }
     if (!S.enabled && !S.family) {
       return '<div class="explain"><p><b>Sync isn’t available.</b> This copy of the site has no server, so progress is kept in this browser only.</p>' +
         '<p>To share progress between your child’s phone and computer (and your phone), upload the whole site, including the <code>api</code> folder, to hosting with PHP. Sync then switches on by itself.</p></div>';

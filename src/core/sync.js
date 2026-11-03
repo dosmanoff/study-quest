@@ -1,10 +1,23 @@
 /*
- * Study Quest — keeping devices in step through api/sync.php.
+ * Study Quest — keeping devices in step.
  *
- * Each family has a code like K7P2-9XQM-4HDT. The server stores one copy of
- * the state per code. Devices pull, merge (storage.merge) and push back.
- * If the site is opened from a file or a host without PHP, sync stays off
- * and everything still works on that one device.
+ * Each family has a code like K7P2-9XQM-4HDT. A server stores one copy of the
+ * state per code. Devices pull, merge (storage.merge) and push back, so the
+ * phone, the PC and a parent's phone all share one progress.
+ *
+ * Two kinds of server ("backends"), chosen in config.js:
+ *   firebase  SQ.config.firebase = { projectId, apiKey }  -> Cloud Firestore
+ *             (works from any host, including GitHub Pages)
+ *   php       SQ.config.syncUrl = 'api/sync.php'           -> api/sync.php
+ * Firebase wins when both are set. With neither, or when the page is opened
+ * from a file, sync stays off and everything works on that one device.
+ *
+ * A backend has three calls:
+ *   ping()                        -> true if it answers
+ *   get(code)                     -> { rev, state|null }
+ *   put(code, baseRev, state)     -> { ok: true, rev } | { conflict: true, rev, state }
+ * A put only succeeds if nobody else saved since baseRev; otherwise the device
+ * merges with the newer copy and tries again.
  */
 (function (root) {
   'use strict';
@@ -15,6 +28,7 @@
     /** 'off' (no server) | 'checking' | 'ready' (server, no code yet) | 'syncing' | 'ok' | 'offline' */
     status: 'off',
     enabled: false,
+    backend: null, // 'firebase' | 'php' | null
     family: null,
     rev: 0,
     lastSync: 0,
@@ -25,11 +39,6 @@
   let adopt = function () {};
   let pushing = false, dirty = false, timer = null;
 
-  /** null means this copy of the site has no sync server (e.g. GitHub Pages). */
-  function endpoint() {
-    return SQ.config && Object.prototype.hasOwnProperty.call(SQ.config, 'syncUrl') ? SQ.config.syncUrl : 'api/sync.php';
-  }
-
   function setStatus(s) {
     S.status = s;
     listeners.forEach(function (fn) { try { fn(s); } catch (e) { /* ignore */ } });
@@ -37,13 +46,14 @@
 
   function saveMeta() { SQ.storage.setMeta('sync', { family: S.family, rev: S.rev }); }
 
-  function request(method, query, body, timeoutMs) {
+  /** fetch + JSON with a timeout. Resolves { status, data }. */
+  function fetchJson(method, url, body, timeoutMs) {
     if (typeof fetch !== 'function' || !root.location || !/^https?:$/.test(root.location.protocol)) {
       return Promise.reject(new Error('no-server'));
     }
     const ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
-    const t = setTimeout(function () { if (ctrl) ctrl.abort(); }, timeoutMs || 10000);
-    return fetch(endpoint() + '?' + query, {
+    const t = setTimeout(function () { if (ctrl) ctrl.abort(); }, timeoutMs || 15000);
+    return fetch(url, {
       method: method,
       headers: body ? { 'Content-Type': 'application/json' } : {},
       body: body ? JSON.stringify(body) : undefined,
@@ -57,6 +67,134 @@
       });
     }).then(function (r) { clearTimeout(t); return r; }, function (e) { clearTimeout(t); throw e; });
   }
+
+  /* ---------- backend: api/sync.php ---------- */
+
+  function phpBackend(url) {
+    const q = function (s) { return url + '?' + s; };
+    return {
+      name: 'php',
+      ping: function () {
+        return fetchJson('GET', q('ping=1'), null, 6000).then(function (r) {
+          return !!(r.data && r.data.ok && r.data.app === 'studyquest');
+        });
+      },
+      get: function (code) {
+        return fetchJson('GET', q('family=' + encodeURIComponent(code))).then(function (r) {
+          if (r.status !== 200 || !r.data || !r.data.ok) throw new Error('get failed');
+          return { rev: r.data.rev || 0, state: r.data.state || null };
+        });
+      },
+      put: function (code, baseRev, state) {
+        return fetchJson('POST', q('family=' + encodeURIComponent(code)), { baseRev: baseRev, state: state }).then(function (r) {
+          if (r.status === 200 && r.data && r.data.ok) return { ok: true, rev: r.data.rev };
+          if (r.data && (r.status === 409 || r.data.error === 'conflict')) {
+            return { conflict: true, rev: r.data.rev || 0, state: r.data.state || null };
+          }
+          throw new Error('put failed: ' + r.status);
+        });
+      },
+    };
+  }
+
+  /* ---------- backend: Cloud Firestore (REST, no SDK) ----------
+   * Document families/<sha256("studyquest:" + code)> with fields
+   *   rev (int), state (JSON string), updated (int, ms).
+   * Saves use a precondition on the document's updateTime, so two devices
+   * saving at once can't overwrite each other: the second one gets a
+   * conflict, merges and saves again. The security rules (README) also
+   * require rev to go up by exactly one.
+   */
+  function firebaseBackend(cfg) {
+    const base = (cfg.baseUrl || 'https://firestore.googleapis.com/v1') + '/projects/' +
+      encodeURIComponent(cfg.projectId) + '/databases/(default)/documents/families/';
+    const times = {}; // code -> updateTime of the copy we last saw
+    const ids = {};
+
+    function docId(code) {
+      if (ids[code]) return Promise.resolve(ids[code]);
+      const subtle = root.crypto && root.crypto.subtle;
+      if (!subtle || typeof TextEncoder === 'undefined') return Promise.reject(new Error('no-crypto'));
+      return subtle.digest('SHA-256', new TextEncoder().encode('studyquest:' + code)).then(function (buf) {
+        const hex = Array.prototype.map.call(new Uint8Array(buf), function (b) { return (b < 16 ? '0' : '') + b.toString(16); }).join('');
+        ids[code] = hex;
+        return hex;
+      });
+    }
+
+    function url(id, params) {
+      const q = [];
+      if (cfg.apiKey) q.push('key=' + encodeURIComponent(cfg.apiKey));
+      Object.keys(params || {}).forEach(function (k) { q.push(k + '=' + encodeURIComponent(params[k])); });
+      return base + id + (q.length ? '?' + q.join('&') : '');
+    }
+
+    function get(code) {
+      return docId(code).then(function (id) { return fetchJson('GET', url(id)); }).then(function (r) {
+        if (r.status === 404) { delete times[code]; return { rev: 0, state: null }; }
+        if (r.status !== 200 || !r.data || !r.data.fields) throw new Error('get failed: ' + r.status);
+        times[code] = r.data.updateTime;
+        const f = r.data.fields;
+        let state = null;
+        try { state = f.state && f.state.stringValue ? JSON.parse(f.state.stringValue) : null; } catch (e) { state = null; }
+        return { rev: Number(f.rev && f.rev.integerValue) || 0, state: state };
+      });
+    }
+
+    function asConflict(code) {
+      return get(code).then(function (cur) { return { conflict: true, rev: cur.rev, state: cur.state }; });
+    }
+
+    return {
+      name: 'firebase',
+      ping: function () {
+        // A made-up document: "not found" means the database is there and readable.
+        return fetchJson('GET', url(new Array(65).join('0')), null, 8000).then(function (r) {
+          if (r.status === 403 && root.console) root.console.warn('Study Quest: Firestore rules refuse access. Paste the rules from the README.');
+          return r.status === 404 || r.status === 200;
+        });
+      },
+      get: get,
+      put: function (code, baseRev, state) {
+        const known = times[code];
+        if (baseRev > 0 && !known) return asConflict(code); // learn the current copy first
+        const pre = baseRev > 0 ? { 'currentDocument.updateTime': known } : { 'currentDocument.exists': 'false' };
+        const now = Date.now();
+        const body = {
+          fields: {
+            rev: { integerValue: String(baseRev + 1) },
+            state: { stringValue: JSON.stringify(state) },
+            updated: { integerValue: String(now) },
+          },
+        };
+        return docId(code).then(function (id) { return fetchJson('PATCH', url(id, pre), body); }).then(function (r) {
+          if (r.status === 200 && r.data && r.data.updateTime) {
+            times[code] = r.data.updateTime;
+            return { ok: true, rev: baseRev + 1 };
+          }
+          const err = r.data && r.data.error ? r.data.error.status : '';
+          if (/FAILED_PRECONDITION|ALREADY_EXISTS|ABORTED|NOT_FOUND|PERMISSION_DENIED/.test(err) ||
+              [400, 403, 404, 409, 412].indexOf(r.status) !== -1) {
+            return asConflict(code);
+          }
+          throw new Error('put failed: ' + r.status);
+        });
+      },
+    };
+  }
+
+  function pickBackend() {
+    // A page opened from a file can't reach any server.
+    if (!root.location || !/^https?:$/.test(root.location.protocol)) return null;
+    const c = SQ.config || {};
+    if (c.firebase && c.firebase.projectId) return firebaseBackend(c.firebase);
+    const php = Object.prototype.hasOwnProperty.call(c, 'syncUrl') ? c.syncUrl : 'api/sync.php';
+    return php ? phpBackend(php) : null;
+  }
+
+  let backend = null;
+
+  /* ---------- codes ---------- */
 
   S.onChange = function (fn) { listeners.push(fn); };
 
@@ -77,21 +215,23 @@
   /** Connect the sync to the app: how to read the current state and how to accept a merged one. */
   S.bind = function (getter, adopter) { getState = getter; adopt = adopter; };
 
-  /** Is there a sync server next to this page? */
+  /** Is there a sync server for this page? */
   S.init = function () {
     const meta = SQ.storage.getMeta('sync') || {};
     S.family = meta.family || null;
     S.rev = meta.rev || 0;
-    if (!endpoint()) {
+    backend = pickBackend();
+    S.backend = backend ? backend.name : null;
+    if (!backend) {
       S.enabled = false;
       setStatus('off');
       return Promise.resolve(false);
     }
     setStatus('checking');
-    return request('GET', 'ping=1', null, 6000).then(function (r) {
-      S.enabled = !!(r.data && r.data.ok && r.data.app === 'studyquest');
-      setStatus(S.enabled ? (S.family ? 'ok' : 'ready') : 'off');
-      return S.enabled;
+    return backend.ping().then(function (ok) {
+      S.enabled = ok;
+      setStatus(ok ? (S.family ? 'ok' : 'ready') : (S.family ? 'offline' : 'off'));
+      return ok;
     }).catch(function () {
       S.enabled = false;
       setStatus(S.family ? 'offline' : 'off');
@@ -99,19 +239,20 @@
     });
   };
 
+  /* ---------- pull and push ---------- */
+
   /** Download the server copy and merge it in. Resolves true if anything was merged. */
   S.pull = function () {
-    if (!S.family || pushing) return Promise.resolve(false);
-    return request('GET', 'family=' + encodeURIComponent(S.family)).then(function (r) {
-      if (r.status !== 200 || !r.data || !r.data.ok) throw new Error('pull failed');
+    if (!S.family || pushing || !backend) return Promise.resolve(false);
+    return backend.get(S.family).then(function (r) {
       S.enabled = true;
-      S.rev = r.data.rev || 0;
+      S.rev = r.rev || 0;
       saveMeta();
       S.lastSync = Date.now();
       setStatus('ok');
-      if (!r.data.state) { dirty = true; schedule(0); return false; }
+      if (!r.state) { dirty = true; schedule(0); return false; }
       const local = getState();
-      const remote = SQ.storage.normalise(r.data.state);
+      const remote = SQ.storage.normalise(r.state);
       const merged = SQ.storage.merge(local, remote);
       adopt(merged);
       if (JSON.stringify(merged) !== JSON.stringify(SQ.storage.merge(remote, remote))) {
@@ -126,27 +267,24 @@
   };
 
   function push(state, attempt) {
-    return request('POST', 'family=' + encodeURIComponent(S.family), { baseRev: S.rev, state: state })
-      .then(function (r) {
-        if (r.status === 200 && r.data && r.data.ok) {
-          S.rev = r.data.rev;
-          saveMeta();
-          S.lastSync = Date.now();
-          return state;
-        }
-        const conflict = r.data && (r.status === 409 || r.data.error === 'conflict');
-        if (conflict && attempt < 4) {
-          S.rev = r.data.rev || 0;
-          const merged = SQ.storage.merge(state, r.data.state);
-          return push(merged, attempt + 1);
-        }
-        throw new Error('push failed: ' + r.status);
-      });
+    return backend.put(S.family, S.rev, state).then(function (r) {
+      if (r.ok) {
+        S.rev = r.rev;
+        saveMeta();
+        S.lastSync = Date.now();
+        return state;
+      }
+      if (r.conflict && attempt < 4) {
+        S.rev = r.rev || 0;
+        return push(SQ.storage.merge(state, r.state), attempt + 1);
+      }
+      throw new Error('push failed');
+    });
   }
 
   function flush() {
     timer = null;
-    if (pushing || !dirty || !S.family) return;
+    if (pushing || !dirty || !S.family || !backend) return;
     pushing = true;
     dirty = false;
     setStatus('syncing');
@@ -191,16 +329,16 @@
   S.join = function (code) {
     code = S.normaliseCode(code);
     if (!S.isValidCode(code)) return Promise.reject(new Error('invalid'));
-    return request('GET', 'family=' + encodeURIComponent(code)).then(function (r) {
-      if (r.status !== 200 || !r.data || !r.data.ok) throw new Error('network');
-      if (!r.data.state) throw new Error('not-found');
+    if (!backend) return Promise.reject(new Error('network'));
+    return backend.get(code).then(function (r) {
+      if (!r.state) throw new Error('not-found');
       S.family = code;
-      S.rev = r.data.rev || 0;
+      S.rev = r.rev || 0;
       saveMeta();
       S.enabled = true;
       setStatus('ok');
       S.lastSync = Date.now();
-      return SQ.storage.normalise(r.data.state);
+      return SQ.storage.normalise(r.state);
     }, function () { throw new Error('network'); });
   };
 

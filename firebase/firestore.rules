@@ -1,0 +1,21 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // One document per family. Its id is a SHA-256 hash of the family code,
+    // so only someone who knows the code can open it. Listing is not allowed.
+    match /families/{familyId} {
+      allow get: if familyId.matches('^[0-9a-f]{64}$');
+      allow list: if false;
+      allow create: if familyId.matches('^[0-9a-f]{64}$')
+        && valid(request.resource.data) && request.resource.data.rev == 1;
+      allow update: if valid(request.resource.data)
+        && request.resource.data.rev == resource.data.rev + 1;
+      allow delete: if false;
+    }
+    function valid(d) {
+      return d.keys().hasOnly(['rev', 'state', 'updated'])
+        && d.rev is int && d.updated is int
+        && d.state is string && d.state.size() < 900000;
+    }
+  }
+}
