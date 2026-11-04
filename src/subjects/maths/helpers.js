@@ -57,6 +57,22 @@
       (note ? '<span class="note">' + note + '</span>' : '');
   };
 
+  /** √n and ∛n. Negative n gets brackets in the plain text: ∛(−27). */
+  M.sqrt = function (n) { return M.piece('√<span class="rad">' + M.fmt(n) + '</span>', '√' + M.br(n)); };
+  M.cbrt = function (n) { return M.piece('∛<span class="rad">' + M.fmt(n) + '</span>', '∛' + M.br(n)); };
+  /** An algebra letter, in italics. */
+  M.v = function (name) { return M.piece('<i>' + name + '</i>', name); };
+
+  /**
+   * Topic-specific hints for typical wrong answers: q.traps = [[value, message], ...].
+   * Falls back to the sign hint.
+   */
+  M.trapDiagnose = function (q, v, signMsg) {
+    const hit = (q.traps || []).find(function (t) { return t[0] === v && t[0] !== q.answer; });
+    if (hit) return hit[1];
+    return M.signDiagnose(q, v, signMsg);
+  };
+
   /** Hint for "right number, wrong sign" mistakes. */
   M.signDiagnose = function (q, v, msg) {
     if (typeof q.answer === 'number' && q.answer !== 0 && v === -q.answer) {
@@ -109,18 +125,58 @@
 
   /* ---------- flat expression solver ----------
    * seq = [term, op, term, op, term ...]
-   * term = { n: 5 } or a power { base: -3, exp: 2, neg?: true }
+   * term = { n: 5 }
+   *      | a power   { base: -3, exp: 2, neg?: true }       (−3² when neg)
+   *      | a bracket { g: [3, '−', 7], exp?: 2, neg?: true } ((3 − 7)²)
    * op   = '×' | '÷' | '+' | '−'
    */
   function isPow(t) { return t && t.base !== undefined; }
-  M.termValue = function (t) { return isPow(t) ? (t.neg ? -1 : 1) * Math.pow(t.base, t.exp) : t.n; };
+  function isGroup(t) { return t && t.g !== undefined; }
+  function apply(a, op, b) {
+    switch (op) {
+      case '×': return a * b;
+      case '÷': return a / b;
+      case '+': return a + b;
+      default: return a - b;
+    }
+  }
+  M.apply = apply;
+  M.groupInner = function (t) { return apply(t.g[0], t.g[1], t.g[2]); };
+  M.termValue = function (t) {
+    if (isGroup(t)) {
+      const v = M.groupInner(t);
+      return (t.neg ? -1 : 1) * (t.exp ? Math.pow(v, t.exp) : v);
+    }
+    return isPow(t) ? (t.neg ? -1 : 1) * Math.pow(t.base, t.exp) : t.n;
+  };
+
+  function groupPiece(t) {
+    const inner = M.fmt(t.g[0]) + ' ' + t.g[1] + ' ' + M.br(t.g[2]);
+    const pre = t.neg ? MINUS : '';
+    if (!t.exp) return M.piece(pre + '(' + inner + ')');
+    return M.piece(pre + '(' + inner + ')<sup>' + t.exp + '</sup>', pre + '(' + inner + ')^' + t.exp);
+  }
 
   M.seqPiece = function (seq) {
     const parts = seq.map(function (x, i) {
       if (i % 2) return M.op(x);
+      if (isGroup(x)) return groupPiece(x);
       return isPow(x) ? M.pow(x.base, x.exp, { neg: x.neg }) : M.num(x.n, i > 0);
     });
     return M.join.apply(null, parts);
+  };
+
+  /** The same calculation with the brackets left out (for spotting that mistake). */
+  M.withoutBrackets = function (seq) {
+    const out = [];
+    for (let i = 0; i < seq.length; i++) {
+      const x = seq[i];
+      if (i % 2 === 0 && isGroup(x)) {
+        if (x.exp || x.neg) return null;
+        out.push({ n: x.g[0] }, x.g[1], { n: x.g[2] });
+      } else out.push(x);
+    }
+    return out;
   };
 
   function signHint(a, b) {
@@ -132,6 +188,18 @@
   M.solveSeq = function (seq) {
     let cur = seq.slice();
     const steps = [];
+    const groups = cur.filter(function (x, i) { return i % 2 === 0 && isGroup(x); });
+    if (groups.length) {
+      const notes = groups.map(function (t) {
+        return M.fmt(t.g[0]) + ' ' + t.g[1] + ' ' + M.br(t.g[2]) + ' = ' + M.fmt(M.groupInner(t));
+      });
+      cur = cur.map(function (x, i) {
+        if (i % 2 || !isGroup(x)) return x;
+        const v = M.groupInner(x);
+        return x.exp ? { base: v, exp: x.exp, neg: x.neg } : { n: (x.neg ? -1 : 1) * v };
+      });
+      steps.push({ seq: cur.slice(), note: 'Brackets first: ' + notes.join(', ') });
+    }
     const powers = cur.filter(function (x, i) { return i % 2 === 0 && isPow(x); });
     if (powers.length) {
       const notes = powers.map(function (t) {

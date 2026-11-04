@@ -443,6 +443,7 @@
       '<ol class="qtrack" aria-hidden="true">' + track + '</ol>' +
       '<div class="qcard" id="qcard">' +
       (q.ask ? '<p class="ask">' + esc(q.ask) + '</p>' : '') +
+      (q.given ? '<p class="given">' + q.given + '</p>' : '') +
       '<div class="expr">' + promptHtml + '<span class="mark" id="qmark"></span></div>' +
       (!inline && q.input !== 'choice' ? '<div class="answer-line"><label for="answer">Answer</label>' + inputHtml + '</div>' : '') +
       '<p class="qmsg" id="qmsg" role="status"></p>' +
