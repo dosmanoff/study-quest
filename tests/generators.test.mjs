@@ -42,6 +42,8 @@ function evaluate(src) {
     return b;
   }
   function primary() {
+    if (peek() === '√') { i++; return Math.sqrt(primary()); }
+    if (peek() === '∛') { i++; return Math.cbrt(primary()); }
     if (peek() === '(') { i++; const v = expr(); assert.equal(s[i++], ')', 'missing ) in ' + src); return v; }
     const m = /^\d+(\.\d+)?/.exec(s.slice(i));
     assert.ok(m, `bad token at ${i} in "${src}"`);
@@ -54,7 +56,14 @@ function evaluate(src) {
 }
 
 function checkEquation(q) {
-  const text = q.text;
+  if (q.verify && typeof q.verify === 'object') {
+    // estimates: the answer is the rounded (or floored) value of the expression
+    const v = evaluate(q.verify.expr);
+    const want = q.verify.mode === 'floor' ? Math.floor(v + 1e-9) : Math.round(v);
+    assert.equal(q.answer, want, `${q.verify.expr}: ${q.verify.mode} is ${want}, answer ${q.answer}`);
+    return;
+  }
+  const text = typeof q.verify === 'string' ? q.verify : q.text;
   assert.equal((text.match(/\?/g) || []).length, 1, 'exactly one ? in ' + text);
   const a = q.answer;
   const sub = a < 0 ? '(' + a + ')' : String(a);
@@ -80,6 +89,10 @@ for (const topic of SQ.allTopics()) {
       assert.ok(!/undefined|NaN|null|\[object/.test(q.prompt + q.text + q.steps.join('')), 'bad text in ' + where);
       assert.ok(Number.isInteger(q.answer), 'non-integer answer in ' + where + ' → ' + q.answer);
       assert.ok(Array.isArray(q.steps) && q.steps.length > 0, 'no steps for ' + where);
+      (q.traps || []).forEach((t) => {
+        assert.ok(Number.isFinite(t[0]) && typeof t[1] === 'string', 'bad trap in ' + where);
+        if (t[0] !== q.answer && Number.isInteger(t[0]) && t[1]) assert.equal(SQ.engine.diagnose(q, t[0]), t[1], 'trap not used in ' + where);
+      });
       assert.ok(q.ask, 'no ask for ' + where);
       const hasBlank = q.prompt.includes('[[?]]');
       const hasQmark = q.prompt.includes('class="qmark"');
