@@ -60,6 +60,41 @@
   /** √n and ∛n. Negative n gets brackets in the plain text: ∛(−27). */
   M.sqrt = function (n) { return M.piece('√<span class="rad">' + M.fmt(n) + '</span>', '√' + M.br(n)); };
   M.cbrt = function (n) { return M.piece('∛<span class="rad">' + M.fmt(n) + '</span>', '∛' + M.br(n)); };
+  /* ---------- fractions ---------- */
+  M.gcd = function (a, b) {
+    a = Math.abs(a); b = Math.abs(b);
+    while (b) { const t = b; b = a % b; a = t; }
+    return a || 1;
+  };
+  M.lcm = function (a, b) { return Math.abs(a / M.gcd(a, b) * b); };
+  M.simplify = function (n, d) { const g = M.gcd(n, d); return [n / g, d / g]; };
+  function fracHtml(n, d) {
+    return '<span class="frac"><span class="fn">' + n + '</span><span class="fd">' + d + '</span></span>';
+  }
+  M.fracHtml = fracHtml;
+  /** Stacked fraction n/d. A part may be M.BLANK for a missing number. */
+  M.frac = function (n, d) {
+    return M.piece(fracHtml(n === M.BLANK ? n : M.fmt(n), d === M.BLANK ? d : M.fmt(d)),
+      (n === M.BLANK ? '?' : M.fmt(n)) + '/' + (d === M.BLANK ? '?' : M.fmt(d)));
+  };
+  /** Mixed number w n/d */
+  M.mixed = function (w, n, d) { return M.piece(w + fracHtml(n, d), w + ' ' + n + '/' + d); };
+  /** For the independent checker: (n/d) and (w + n/d) */
+  M.fv = function (n, d) { return '(' + n + '/' + d + ')'; };
+  M.mv = function (w, n, d) { return '(' + w + ' + ' + n + '/' + d + ')'; };
+  /** Simplest-form answer string: '3/4', '7/4', '2' */
+  M.fracAnswer = function (n, d) {
+    const s = M.simplify(n, d);
+    return s[1] === 1 ? M.fmt(s[0]) : M.fmt(s[0]) + '/' + s[1];
+  };
+  /** HTML for a value: whole number or stacked fraction (mixed: true for 1¾ style) */
+  M.fracValueHtml = function (n, d, mixed) {
+    const s = M.simplify(n, d);
+    if (s[1] === 1) return M.fmt(s[0]);
+    if (mixed && s[0] > s[1]) return Math.floor(s[0] / s[1]) + fracHtml(s[0] % s[1], s[1]);
+    return fracHtml(s[0], s[1]);
+  };
+
   /** An algebra letter, in italics. */
   M.v = function (name) { return M.piece('<i>' + name + '</i>', name); };
 

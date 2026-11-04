@@ -66,7 +66,7 @@ function checkEquation(q) {
   const text = typeof q.verify === 'string' ? q.verify : q.text;
   assert.equal((text.match(/\?/g) || []).length, 1, 'exactly one ? in ' + text);
   const a = q.answer;
-  const sub = a < 0 ? '(' + a + ')' : String(a);
+  const sub = typeof a === 'string' ? '(' + a.replace(/\u2212/g, '-') + ')' : a < 0 ? '(' + a + ')' : String(a);
   const [lhs, rhs] = text.replace('?', sub).split('=');
   assert.ok(rhs !== undefined, 'no = in ' + text);
   const L = evaluate(lhs), R = evaluate(rhs);
@@ -87,7 +87,13 @@ for (const topic of SQ.allTopics()) {
       assert.equal(typeof q.prompt, 'string', where);
       assert.ok(q.prompt.length > 0, where);
       assert.ok(!/undefined|NaN|null|\[object/.test(q.prompt + q.text + q.steps.join('')), 'bad text in ' + where);
-      assert.ok(Number.isInteger(q.answer), 'non-integer answer in ' + where + ' → ' + q.answer);
+      if (q.input === 'fraction') {
+        const f = SQ.engine.parseFraction(q.answer);
+        assert.ok(f && f.d && f.simplest, 'answer not in simplest form in ' + where + ' → ' + q.answer);
+        assert.ok(f.d === 1 || f.form === 'fraction', 'canonical answer should be n/d or whole: ' + where);
+      } else {
+        assert.ok(Number.isInteger(q.answer), 'non-integer answer in ' + where + ' → ' + q.answer);
+      }
       assert.ok(Array.isArray(q.steps) && q.steps.length > 0, 'no steps for ' + where);
       (q.traps || []).forEach((t) => {
         assert.ok(Number.isFinite(t[0]) && typeof t[1] === 'string', 'bad trap in ' + where);
@@ -99,10 +105,40 @@ for (const topic of SQ.allTopics()) {
       assert.ok(hasBlank || hasQmark, 'no answer place in prompt: ' + where);
       checkEquation(q);
       // diagnose must never throw, for a few typical wrong answers
-      for (const wrong of [-q.answer, q.answer + 1, q.answer - 1, 0, 999]) {
+      for (const wrong of (q.input === 'fraction' ? [] : [-q.answer, q.answer + 1, q.answer - 1, 0, 999])) {
         if (wrong === q.answer) continue;
         const d = SQ.engine.diagnose(q, wrong);
         assert.ok(d === null || typeof d === 'string', where);
+      }
+      if (q.input === 'fraction') {
+        // right answer, its mixed form, an unsimplified form, and a wrong value
+        const f = SQ.engine.parseFraction(q.answer);
+        const ok1 = SQ.engine.parseAnswer(q, q.answer);
+        assert.ok(ok1.ok && SQ.engine.isCorrect(q, ok1.value), 'answer rejected: ' + where);
+        const mixedText = SQ.engine.fracText(f.n, f.d, true);
+        const okM = SQ.engine.parseAnswer(q, mixedText);
+        assert.ok(okM.ok && SQ.engine.isCorrect(q, okM.value), 'mixed form rejected: ' + where);
+        if (q.wantForm === 'mixed') {
+          assert.ok(!SQ.engine.formProblem(q, okM), 'mixed form flagged: ' + where);
+          assert.ok(SQ.engine.formProblem(q, ok1), 'mixed form not asked for: ' + where);
+        } else if (q.wantForm === 'improper') {
+          assert.ok(!SQ.engine.formProblem(q, ok1), 'improper form flagged: ' + where);
+          if (mixedText !== q.answer) assert.ok(SQ.engine.formProblem(q, okM), 'improper form not asked for: ' + where);
+        } else {
+          assert.ok(!SQ.engine.formProblem(q, ok1) && !SQ.engine.formProblem(q, okM), 'simplest answer flagged: ' + where);
+        }
+        const big = SQ.engine.parseAnswer(q, (f.n * 2) + '/' + (f.d * 2));
+        assert.ok(big.ok && SQ.engine.isCorrect(q, big.value) && SQ.engine.formProblem(q, big), 'unsimplified answer not flagged: ' + where);
+        const off = SQ.engine.parseAnswer(q, (f.n + 1) + '/' + f.d);
+        assert.ok(off.ok && !SQ.engine.isCorrect(q, off.value), 'wrong value accepted: ' + where);
+        (q.ftraps || []).forEach((t) => {
+          const tv = SQ.engine.parseAnswer(q, t[0]);
+          assert.ok(tv.ok, 'bad trap ' + t[0] + ' in ' + where);
+          if (!SQ.engine.isCorrect(q, tv.value)) assert.equal(SQ.engine.diagnose(q, tv.value), t[1], 'fraction trap not used in ' + where);
+        });
+        keys.add(q.key);
+        total++;
+        continue;
       }
       // the checker accepts the right answer typed in different ways
       const typed = q.answer < 0 ? '−' + Math.abs(q.answer) : String(q.answer);
@@ -112,7 +148,7 @@ for (const topic of SQ.allTopics()) {
       assert.ok(p2.ok && SQ.engine.isCorrect(q, p2.value), 'checker rejects ascii form for ' + where);
       assert.ok(!SQ.engine.isCorrect(q, SQ.engine.parseAnswer(q, String(q.answer + 1)).value), where);
       keys.add(q.key);
-      maxAbs = Math.max(maxAbs, Math.abs(q.answer));
+      maxAbs = Math.max(maxAbs, Math.abs(Number(q.answer)) || 0);
       total++;
     }
     assert.ok(keys.size >= 20, `${topic.id} L${level.id} has only ${keys.size} different questions`);

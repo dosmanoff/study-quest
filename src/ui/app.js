@@ -15,6 +15,7 @@
     del: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11v12H9l-6-6z"/><path d="M12.5 9.5l5 5M17.5 9.5l-5 5"/></svg>',
     close: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>',
     swap: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10l5 5 5-5"/></svg>',
+    next: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"/></svg>',
     lock: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>',
   };
 
@@ -385,8 +386,8 @@
   }
 
   function keypadHtml(q) {
-    const dot = q.input === 'number';
-    return '<div class="keypad' + (dot ? ' with-dot' : '') + '" role="group" aria-label="Number pad">' +
+    const dot = q.input === 'number', frac = q.input === 'fraction';
+    return '<div class="keypad' + (dot || frac ? ' with-dot' : '') + '" role="group" aria-label="Number pad">' +
       [7, 8, 9].map(k).join('') +
       '<button class="key fn" data-act="key" data-k="back" aria-label="Delete" style="grid-area:back">' + ICON.del + '</button>' +
       [4, 5, 6].map(k).join('') +
@@ -394,6 +395,7 @@
       [1, 2, 3].map(k).join('') +
       '<button class="key" data-act="key" data-k="0" style="grid-area:k0">0</button>' +
       (dot ? '<button class="key" data-act="key" data-k="dot" aria-label="Decimal point" style="grid-area:dot">.</button>' : '') +
+      (frac ? '<button class="key fn" data-act="key" data-k="next" aria-label="Next box" style="grid-area:dot">' + ICON.next + '</button>' : '') +
       '<button class="key key-check" data-act="check" style="grid-area:check">Check</button>' +
       '</div>';
     function k(n) { return '<button class="key" data-act="key" data-k="' + n + '" style="grid-area:k' + n + '">' + n + '</button>'; }
@@ -416,10 +418,16 @@
       track += '<li class="' + cls + '">' + (r ? (r.ok ? ICON.tick : ICON.cross) : '') + '</li>';
     }
 
-    const numeric = q.input === 'integer' || q.input === 'number';
-    const inputHtml = '<input id="answer" class="blank" type="text" autocomplete="off" autocorrect="off" autocapitalize="off" ' +
-      'spellcheck="false" enterkeyhint="done" inputmode="' + (numeric ? (coarse ? 'none' : 'decimal') : 'text') + '" ' +
-      'aria-label="Your answer">';
+    const numeric = q.input === 'integer' || q.input === 'number' || q.input === 'fraction';
+    const boxAttrs = 'type="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="done" ' +
+      'inputmode="' + (numeric ? (coarse ? 'none' : (q.input === 'number' ? 'decimal' : 'numeric')) : 'text') + '"';
+    const inputHtml = q.input === 'fraction'
+      ? '<span class="frac-answer">' +
+        '<input id="ans-w" class="blank frac-box whole" ' + boxAttrs + ' aria-label="Whole number, leave empty if there is none">' +
+        '<span class="frac-stack"><input id="ans-n" class="blank frac-box" ' + boxAttrs + ' aria-label="Top number">' +
+        '<span class="frac-line" aria-hidden="true"></span>' +
+        '<input id="ans-d" class="blank frac-box" ' + boxAttrs + ' aria-label="Bottom number"></span></span>'
+      : '<input id="answer" class="blank" ' + boxAttrs + ' aria-label="Your answer">';
     const inline = q.input !== 'choice' && q.prompt.indexOf('[[?]]') !== -1;
     const promptHtml = inline ? q.prompt.replace('[[?]]', inputHtml) : q.prompt;
 
@@ -454,23 +462,56 @@
 
     sess.qStart = Date.now();
     sess.locked = false;
-    const inp = doc.getElementById('answer');
-    if (inp) {
+    const boxes = answerBoxes();
+    app.activeBox = q.input === 'fraction' ? 'ans-n' : 'answer';
+    boxes.forEach(function (inp) {
+      inp.addEventListener('focus', function () { app.activeBox = inp.id; });
       inp.addEventListener('input', function () {
         if (numeric) {
-          const v = inp.value.replace(/[-–—]/g, '−').replace(/[^0-9−.,]/g, '');
+          const allowed = inp.id === 'ans-d' ? /[^0-9]/g : q.input === 'fraction' ? /[^0-9−]/g : /[^0-9−.,]/g;
+          const v = inp.value.replace(/[-–—]/g, '−').replace(allowed, '');
           if (v !== inp.value) inp.value = v;
         }
         sizeInput(inp);
         msg('');
       });
       inp.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter') { e.preventDefault(); submit(); }
+        if (e.key === 'Enter') { e.preventDefault(); submit(); return; }
+        if (q.input !== 'fraction') return;
+        if (e.key === '/' && inp.id !== 'ans-d') { e.preventDefault(); focusBox('ans-d'); }
+        else if (e.key === ' ' && inp.id === 'ans-w') { e.preventDefault(); focusBox('ans-n'); }
       });
       sizeInput(inp);
-      try { inp.focus({ preventScroll: true }); } catch (e) { inp.focus(); }
-    }
+    });
+    if (boxes.length) focusBox(app.activeBox);
   };
+
+  /** The answer input(s) on screen: one box, or whole/top/bottom for fractions. */
+  function answerBoxes() {
+    return ['answer', 'ans-w', 'ans-n', 'ans-d'].map(function (id) { return doc.getElementById(id); }).filter(Boolean);
+  }
+  function activeBox() { return doc.getElementById(app.activeBox) || answerBoxes()[0] || null; }
+  function focusBox(id) {
+    const el = doc.getElementById(id);
+    if (!el) return;
+    app.activeBox = id;
+    try { el.focus({ preventScroll: true }); } catch (e) { el.focus(); }
+  }
+
+  /** What was typed, as one string ("1 3/4" for fractions). */
+  function typedAnswer(q) {
+    if (q.input !== 'fraction') { const inp = doc.getElementById('answer'); return { raw: inp ? inp.value : '' }; }
+    const w = (doc.getElementById('ans-w').value || '').trim();
+    const n = (doc.getElementById('ans-n').value || '').trim();
+    const d = (doc.getElementById('ans-d').value || '').trim();
+    if (!w && !n && !d) return { raw: '' };
+    if (d && !n) return { incomplete: 'Fill in the top number too.' };
+    if (n && !d) {
+      if (w) return { incomplete: 'Fill in the bottom number too.' };
+      return { raw: n }; // just a whole number typed in the top box
+    }
+    return { raw: (w ? w + ' ' : '') + (n ? n + '/' + d : '') };
+  }
 
   function sizeInput(inp) {
     const len = Math.max(1, inp.value.length);
@@ -486,8 +527,14 @@
 
   function press(k) {
     const sess = app.session;
-    const inp = doc.getElementById('answer');
+    let inp = activeBox();
     if (!sess || sess.locked || !inp) return;
+    if (k === 'next') {
+      const order = ['ans-w', 'ans-n', 'ans-d'];
+      focusBox(order[(order.indexOf(inp.id) + 1) % order.length]);
+      return;
+    }
+    if (k === 'minus' && inp.id === 'ans-d') inp = doc.getElementById('ans-n');
     let v = inp.value;
     if (k === 'back') v = v.slice(0, -1);
     else if (k === 'minus') v = v.charAt(0) === '−' ? v.slice(1) : '−' + v;
@@ -517,17 +564,25 @@
     const sess = app.session;
     if (!sess || sess.locked) return;
     const q = sess.questions[sess.index];
-    const inp = doc.getElementById('answer');
-    const raw = q.input === 'choice' ? choiceIndex : (inp ? inp.value : '');
-    const parsed = E.parseAnswer(q, raw);
-    if (!parsed.ok) {
-      msg(parsed.reason === 'empty' ? 'Type your answer first.' : 'That isn’t a number yet. Use digits and the − key.', 'warn');
+    const typed = q.input === 'choice' ? { raw: choiceIndex } : typedAnswer(q);
+    const nudge = function (text) {
+      msg(text, 'warn');
       const card = doc.getElementById('qcard');
       if (card) { card.classList.remove('shake'); void card.offsetWidth; card.classList.add('shake'); }
-      return;
+    };
+    if (typed.incomplete) return nudge(typed.incomplete);
+    const parsed = E.parseAnswer(q, typed.raw);
+    if (!parsed.ok) {
+      return nudge(parsed.reason === 'empty' ? 'Type your answer first.'
+        : parsed.reason === 'zero-denominator' ? 'The bottom number can’t be 0.'
+        : parsed.reason === 'not-a-fraction' ? 'Write a whole number, or fill in the top and the bottom.'
+        : 'That isn’t a number yet. Use digits and the − key.');
     }
+    // Right value, written the wrong way (e.g. not simplified): ask again, not a mistake.
+    const form = E.formProblem(q, parsed);
+    if (form) return nudge(form);
     sess.locked = true;
-    if (inp) inp.readOnly = true;
+    answerBoxes().forEach(function (b) { b.readOnly = true; });
     const ok = E.isCorrect(q, parsed.value);
     sess.results.push({
       t: q.topic, l: q.level, q: q.text, a: E.answerText(q), g: parsed.shown, ok: ok,
@@ -922,8 +977,8 @@
 
   function onKey(e) {
     if (!app.screen || app.screen.name !== 'quiz' || !app.session || app.session.locked) return;
-    const inp = doc.getElementById('answer');
-    if (!inp || doc.activeElement === inp || e.ctrlKey || e.metaKey || e.altKey) return;
+    const inp = activeBox();
+    if (!inp || answerBoxes().indexOf(doc.activeElement) !== -1 || e.ctrlKey || e.metaKey || e.altKey) return;
     if (/^[0-9]$/.test(e.key)) { press(e.key); e.preventDefault(); }
     else if (e.key === '-' || e.key === '−') { press('minus'); e.preventDefault(); }
     else if (e.key === 'Backspace') { press('back'); e.preventDefault(); }

@@ -8,7 +8,9 @@
  *   prompt: '(−6) × 4 = [[?]]',         // HTML; [[?]] marks where the answer box goes
  *   text:   '(−6) × 4 = ?',             // plain text for history (and tests)
  *   answer: -24,                        // number | string | choice index
- *   input:  'integer',                  // 'integer' | 'number' | 'text' | 'choice' (defaults to topic.input)
+ *   input:  'integer',                  // 'integer' | 'number' | 'fraction' | 'text' | 'choice' (defaults to topic.input)
+ *                                       // fraction answers are strings like '3/4', '7/4', '−2' (simplest form);
+ *                                       // wantForm: 'mixed' | 'improper' asks for that way of writing it
  *   choices: ['a', 'b'],                // for 'choice'
  *   accept: ['colour', 'color'],        // extra accepted answers for 'text'
  *   steps:  ['HTML', ...],              // worked solution shown after a mistake
@@ -79,7 +81,55 @@
   const DASHES = /[−–—‒]/g;
 
   /** Clean up what was typed. Returns { ok, value, shown } or { ok:false, reason }. */
+  function gcd(a, b) {
+    a = Math.abs(a); b = Math.abs(b);
+    while (b) { const t = b; b = a % b; a = t; }
+    return a || 1;
+  }
+  E.gcd = gcd;
+
+  /**
+   * "3/4", "−3/4", "1 3/4", "2" -> { n, d, form: 'whole'|'fraction'|'mixed', simplest }.
+   * Returns null if it isn't a fraction, { zero: true } for a zero denominator.
+   */
+  E.parseFraction = function (raw) {
+    const s = String(raw == null ? '' : raw).replace(DASHES, '-').trim().replace(/\s+/g, ' ');
+    let m = /^([+-]?)(\d+)$/.exec(s);
+    if (m) return { n: (m[1] === '-' ? -1 : 1) * Number(m[2]), d: 1, form: 'whole', simplest: true };
+    m = /^([+-]?)(\d+) ?\/ ?(\d+)$/.exec(s);
+    if (m) {
+      const n = Number(m[2]), d = Number(m[3]);
+      if (!d) return { zero: true };
+      return { n: (m[1] === '-' ? -1 : 1) * n, d: d, form: 'fraction', simplest: d !== 1 && gcd(n, d) === 1 };
+    }
+    m = /^([+-]?)(\d+) (\d+) ?\/ ?(\d+)$/.exec(s);
+    if (m) {
+      const w = Number(m[2]), n = Number(m[3]), d = Number(m[4]);
+      if (!d) return { zero: true };
+      const sign = m[1] === '-' ? -1 : 1;
+      return { n: sign * (w * d + n), d: d, form: 'mixed', simplest: n > 0 && n < d && gcd(n, d) === 1 };
+    }
+    return null;
+  };
+
+  /** Fraction value as text: 3/4, 1 3/4 (mixed: true), −2 */
+  E.fracText = function (n, d, mixed) {
+    const g = gcd(n, d), sign = (n < 0) !== (d < 0) && n !== 0 ? '\u2212' : '';
+    n = Math.abs(n / g); d = Math.abs(d / g);
+    if (d === 1) return sign + n;
+    if (mixed && n > d) return sign + Math.floor(n / d) + ' ' + (n % d) + '/' + d;
+    return sign + n + '/' + d;
+  };
+
   E.parseAnswer = function (q, raw) {
+    if (q.input === 'fraction') {
+      const f = E.parseFraction(raw);
+      if (String(raw == null ? '' : raw).trim() === '') return { ok: false, reason: 'empty' };
+      if (!f) return { ok: false, reason: 'not-a-fraction' };
+      if (f.zero) return { ok: false, reason: 'zero-denominator' };
+      const shown = String(raw).replace(DASHES, '-').replace(/-/g, '\u2212').trim().replace(/\s+/g, ' ').replace(/ ?\/ ?/, '/');
+      return { ok: true, value: f, shown: shown };
+    }
     if (q.input === 'choice') {
       const idx = Number(raw);
       if (raw === '' || raw == null || !Number.isInteger(idx)) return { ok: false, reason: 'empty' };
@@ -104,6 +154,10 @@
 
   E.isCorrect = function (q, value) {
     switch (q.input) {
+      case 'fraction': {
+        const a = E.parseFraction(q.answer);
+        return !!(a && value && value.d) && value.n * a.d === a.n * value.d;
+      }
       case 'text': {
         const ok = [q.answer].concat(q.accept || []).map(normText);
         return ok.indexOf(normText(value)) !== -1;
@@ -127,7 +181,33 @@
   };
 
   /** How the answer is displayed. */
+  /**
+   * The right value written the wrong way (not simplified, or not in the form
+   * the question asks for). Such an answer is not counted as a mistake: the
+   * child is asked to rewrite it. Returns a message or null.
+   */
+  E.formProblem = function (q, parsed) {
+    if (q.input !== 'fraction' || !parsed || !parsed.ok || !E.isCorrect(q, parsed.value)) return null;
+    const f = parsed.value;
+    const whole = f.n % f.d === 0;
+    if (!f.simplest) {
+      return whole ? 'Correct value! Now write it as a whole number.' : 'Correct value! Now write it in its simplest form.';
+    }
+    if (!whole && Math.abs(f.n) > f.d) {
+      if (q.wantForm === 'mixed' && f.form !== 'mixed') return 'Correct value! Now write it as a mixed number, like 2 1/3.';
+      if (q.wantForm === 'improper' && f.form !== 'fraction') return 'Correct value! Now write it as an improper (top-heavy) fraction, like 7/3.';
+    }
+    return null;
+  };
+
   E.answerText = function (q) {
+    if (q.input === 'fraction') {
+      const a = E.parseFraction(q.answer);
+      if (!a) return String(q.answer);
+      const plain = E.fracText(a.n, a.d), mixed = E.fracText(a.n, a.d, true);
+      if (q.wantForm === 'mixed') return mixed;
+      return plain === mixed ? plain : plain + ' (= ' + mixed + ')';
+    }
     if (q.input === 'choice') return q.choices ? q.choices[q.answer] : String(q.answer);
     if (typeof q.answer === 'number') {
       return q.answer < 0 ? '−' + String(Math.abs(q.answer)) : String(q.answer);
