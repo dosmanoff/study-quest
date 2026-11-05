@@ -438,10 +438,20 @@
       '<p>Practice on single topics never affects rewards. Mistakes there cost nothing, so it is the place to work on the hard parts.</p></div>';
   }
 
+  /**
+   * The child shown in the panel, looked up again at every change. Sync can
+   * replace the whole state (and every child object) at any moment, so a
+   * child kept from when the tab opened may no longer be the one that is saved.
+   */
+  function currentPk(id) { return SQ.family.child(app.state, id); }
+
   bind.challenge = function () {
-    const c = pk(), st = c.settings;
+    const id = pk().id;
     const form = $('rules-form');
     form.addEventListener('change', function () {
+      const c = currentPk(id);
+      if (!c) return;
+      const st = c.settings;
       st.setSize = Number($('set-size').value);
       st.setsRequired = Number($('sets-required').value);
       st.rewardMinutes = Number($('reward-minutes').value);
@@ -477,9 +487,11 @@
   }
 
   bind.topics = function () {
-    const c = pk();
+    const id = pk().id;
     const form = $('topics-form');
     form.addEventListener('change', function (e) {
+      const c = currentPk(id);
+      if (!c) return;
       const boxes = form.querySelectorAll('input[type="checkbox"]');
       const map = {};
       const order = [];
