@@ -213,6 +213,36 @@ try {
   await A.check('input[data-topic="maths.bidmas"][data-level="1"]');
   await A.waitForFunction(() => window.SQ.ui.kid().settings.assignment.some((a) => a.topic === 'maths.bidmas'));
   await shot(A, '17-parent-topics');
+
+  /* ---------- several changes in a row, with a sync between each, all stay (regression) ---------- */
+  const asgOf = () => A.evaluate(() => JSON.stringify(window.SQ.ui.kid().settings.assignment));
+  const synced = async () => { await A.waitForTimeout(1800); await A.waitForFunction(() => window.SQ.sync.status === 'ok'); };
+  await synced();
+  await A.uncheck('input[data-topic="maths.negatives"][data-level="1"]');
+  await synced();
+  await A.check('input[data-topic="maths.fractions"][data-level="1"]');
+  await synced();
+  let asg = await asgOf();
+  assert.ok(asg.includes('"maths.bidmas"') && asg.includes('"maths.fractions"') && !asg.includes('"maths.negatives","levels":[1'), 'every topic change kept: ' + asg);
+  await A.click('[data-tab="challenge"]');
+  await A.selectOption('#sets-required', '3');
+  await synced();
+  await A.selectOption('#reward-minutes', '45');
+  await synced();
+  await A.selectOption('#sets-required', '2');
+  await synced();
+  const rules = await A.evaluate(() => { const st = window.SQ.ui.kid().settings; return [st.setSize, st.setsRequired, st.rewardMinutes]; });
+  assert.deepEqual(rules, [8, 2, 45], 'every rule change kept');
+  await A.reload();
+  await A.waitForFunction(() => window.SQ.ui && window.SQ.ui.kid && window.SQ.ui.kid());
+  assert.equal(await asgOf(), asg, 'topics survive a reload');
+  assert.equal(await A.evaluate(() => window.SQ.ui.kid().settings.rewardMinutes), 45, 'rules survive a reload');
+  await A.click('[data-act="parent"]');
+  await A.waitForSelector('.pinpad, .tiles');
+  if (await A.isVisible('.pinpad')) await A.keyboard.type('1234');
+  await A.waitForSelector('.tiles');
+  await A.click('[data-tab="topics"]');
+  step('several topic and rule changes in a row are all saved, also after a reload');
   await A.waitForFunction(() => window.SQ.sync.status === 'ok');
   await A.waitForTimeout(2000);
   await B.evaluate(() => window.SQ.sync.pull());
