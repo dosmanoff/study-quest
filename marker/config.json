@@ -1,0 +1,13 @@
+{
+  "_comment": "Business Quest marking job. Secrets (API key, bank key, family codes) are GitHub secrets, never here. See README.",
+  "model": "claude-sonnet-5-5",
+  "fallbacks": "default",
+  "effort": null,
+  "maxTokens": 16000,
+  "dailyLimit": 60,
+  "maxTries": 3,
+  "leaseMinutes": 10,
+  "maxRetries": 1,
+  "timeoutMs": 300000,
+  "firebaseProjectId": "study-quest-1b14b"
+}

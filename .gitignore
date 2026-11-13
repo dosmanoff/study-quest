@@ -7,3 +7,8 @@ node_modules/
 api/data/*.php
 api/data/*.lock
 api/data/*.tmp
+
+# Business Quest: the plain question bank with the markscheme and its key
+# stay off GitHub (see tools/bank.mjs). Only marker/bank.enc is committed.
+src/subjects/business/bank.json
+.bank-key

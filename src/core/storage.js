@@ -23,7 +23,8 @@
 (function (root) {
   'use strict';
   const SQ = root.SQ;
-  const KEY = 'studyquest.v1';
+  const APP = SQ.appId || 'studyquest';
+  const KEY = APP + '.v1';
   const MAX_HISTORY = 250; // sets kept in history, per child
   const MAX_REWARDS = 250;
 
@@ -112,6 +113,12 @@
     return c;
   }
 
+  /* The parts of a child that depend on the app. Study Quest (maths) uses the
+   * functions above; another app can set SQ.model = { blankChild,
+   * normaliseChild, mergeChild, trimChild } before the first load. */
+  const mathsModel = { blankChild: blankChild, normaliseChild: normaliseChild, mergeChild: mergeChild, trimChild: trimChild };
+  function model() { return SQ.model || mathsModel; }
+
   function normalise(raw) {
     const s = blankState();
     if (!raw || typeof raw !== 'object') return s;
@@ -119,7 +126,7 @@
       // Version 1 had one child and the parent PIN in settings.
       s.family = { pinHash: raw.settings.pinHash || null, homeAssistant: false, updatedAt: raw.settings.updatedAt || 0 };
       if (raw.settings.pinHash) {
-        const c = normaliseChild(Object.assign({}, raw, { id: 'main' }));
+        const c = model().normaliseChild(Object.assign({}, raw, { id: 'main' }));
         c.createdAt = 1;
         s.children = [c];
       }
@@ -130,7 +137,7 @@
       homeAssistant: !!(raw.family && raw.family.homeAssistant),
       updatedAt: (raw.family && Number(raw.family.updatedAt)) || 0,
     };
-    s.children = Array.isArray(raw.children) ? raw.children.filter(Boolean).map(normaliseChild) : [];
+    s.children = Array.isArray(raw.children) ? raw.children.filter(Boolean).map(function (c) { return model().normaliseChild(c); }) : [];
     return s;
   }
 
@@ -187,8 +194,8 @@
 
     const byId = {};
     a.children.forEach(function (c) { byId[c.id] = c; });
-    b.children.forEach(function (c) { byId[c.id] = byId[c.id] ? mergeChild(byId[c.id], c) : c; });
-    out.children = Object.keys(byId).map(function (k) { return trimChild(byId[k]); })
+    b.children.forEach(function (c) { byId[c.id] = byId[c.id] ? model().mergeChild(byId[c.id], c) : c; });
+    out.children = Object.keys(byId).map(function (k) { return model().trimChild(byId[k]); })
       .sort(function (x, y) { return (x.createdAt || 0) - (y.createdAt || 0) || (x.id < y.id ? -1 : 1); });
     return out;
   }
@@ -221,26 +228,26 @@
     },
 
     save: function (state) {
-      state.children.forEach(trimChild);
+      state.children.forEach(function (c) { model().trimChild(c); });
       memoryCopy = clone(state);
       write(KEY, state);
     },
 
     /** Small key/value store for device-only things (sync code, chosen child, etc.). */
-    getMeta: function (name) { return read('studyquest.meta.' + name); },
-    setMeta: function (name, value) { write('studyquest.meta.' + name, value); },
+    getMeta: function (name) { return read(APP + '.meta.' + name); },
+    setMeta: function (name, value) { write(APP + '.meta.' + name, value); },
 
     /** Validate and normalise an imported backup. Throws on garbage. */
     parseBackup: function (text) {
       const raw = JSON.parse(text);
       if (!raw || typeof raw !== 'object' || !(raw.settings || Array.isArray(raw.children))) {
-        throw new Error('Not a Study Quest backup');
+        throw new Error('Not a backup');
       }
       return normalise(raw);
     },
 
     blank: blankState,
-    blankChild: blankChild,
+    blankChild: function (name, id) { return model().blankChild(name, id); },
     normalise: normalise,
     merge: merge,
   };
