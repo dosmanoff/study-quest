@@ -6,6 +6,8 @@
 // dist/pages/           -> GitHub Pages version (no server, no sync)
 // dist/study-quest.html -> the same app as one file (works offline, no sync)
 // dist/artifact.html    -> page body for a claude.ai artifact preview
+// dist/pages/business/  -> Business Quest (business/index.html), GitHub Pages only:
+//                          its marking runs as a GitHub Actions job (see README)
 import { readFileSync, writeFileSync, mkdirSync, rmSync, cpSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -83,8 +85,32 @@ cpSync(join(here, 'api'), join(dist, 'site', 'api'), {
 });
 if (!existsSync(join(dist, 'site', 'api', 'data', '.htaccess'))) throw new Error('api/data/.htaccess missing');
 
+/* ---------- Business Quest: its own page on the same core ---------- */
+const bizHtml = read('business/index.html');
+const fromBiz = (p) => p.replace(/^\.\.\//, '');
+const bizScripts = [...bizHtml.matchAll(/<script src="([^"]+)"><\/script>/g)].map((m) => fromBiz(m[1]));
+const bizStyles = [...bizHtml.matchAll(/<link rel="stylesheet" href="(\.\.\/src\/[^"]+)">/g)].map((m) => fromBiz(m[1]));
+const bizJs = bizScripts.map((s) => `/* ---- ${s} ---- */\n` + read(s)).join('\n').replace(/<\/script/gi, '<\\/script');
+if (/"ms":|"pts":|"notes":/.test(bizJs)) throw new Error('markscheme content must not be in the Business Quest page');
+const bizPage = `<!doctype html>
+<html lang="en">
+<head>
+${head().replace('<title>Study Quest</title>', '<title>Business Quest</title>').replace(/<style>[\s\S]*<\/style>/, () => '<style>\n' + bizStyles.map(read).join('\n') + '\n</style>')}
+</head>
+<body>
+<div id="root"><noscript>Business Quest needs JavaScript turned on.</noscript></div>
+<script>
+${bizJs}
+</script>
+</body>
+</html>
+`;
+mkdirSync(join(dist, 'pages', 'business'), { recursive: true });
+writeFileSync(join(dist, 'pages', 'business', 'index.html'), bizPage);
+
 console.log(`Built ${scripts.length} scripts, ${(full.length / 1024).toFixed(0)} KB:`);
 console.log('  dist/site/ (index.html + api/)');
 console.log('  dist/pages/ (GitHub Pages)');
 console.log('  dist/study-quest.html');
 console.log('  dist/artifact.html');
+console.log(`Business Quest: ${bizScripts.length} scripts, ${(bizPage.length / 1024).toFixed(0)} KB -> dist/pages/business/`);

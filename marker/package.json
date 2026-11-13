@@ -1,0 +1,12 @@
+{
+  "name": "business-quest-marker",
+  "private": true,
+  "description": "Marks Business Quest answers with Claude (run by .github/workflows/mark.yml)",
+  "type": "module",
+  "scripts": {
+    "drain": "node mark.mjs --drain"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "1.5.0"
+  }
+}

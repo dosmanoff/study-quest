@@ -1,0 +1,51 @@
+# Business Quest: marks the written answers that are waiting, with Claude,
+# against the markscheme. Runs every 10 minutes and on demand ("Mark now" in
+# the parent panel opens this page: Run workflow).
+#
+# Repository secrets (Settings -> Secrets and variables -> Actions):
+#   ANTHROPIC_API_KEY  Claude API key. Without it answers just stay pending.
+#   BQ_BANK_KEY        decrypts marker/bank.enc (markscheme, not in the site)
+#   BQ_FAMILY_CODES    Business Quest family code(s), comma-separated
+# Model and daily limit: marker/config.json. See README, "Business Quest".
+name: Mark Business Quest answers
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+    inputs:
+      only:
+        description: 'Only this answer id (optional, empty = all waiting answers)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+# One run at a time; each answer is also claimed with a lease in Firestore,
+# so an answer is never marked twice.
+concurrency:
+  group: business-quest-marking
+  cancel-in-progress: false
+
+jobs:
+  mark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: marker/package-lock.json
+      - name: Install the marker
+        working-directory: marker
+        run: npm ci --no-audit --no-fund
+      - name: Mark waiting answers
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          BQ_BANK_KEY: ${{ secrets.BQ_BANK_KEY }}
+          BQ_FAMILY_CODES: ${{ secrets.BQ_FAMILY_CODES }}
+          BQ_ONLY: ${{ github.event.inputs.only }}
+        run: node marker/mark.mjs --drain

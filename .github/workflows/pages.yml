@@ -1,5 +1,6 @@
 # Publishes the site to GitHub Pages on every change to main:
 # https://dosmanoff.github.io/study-quest/
+# https://dosmanoff.github.io/study-quest/business/  (Business Quest)
 # One-time setup: Settings -> Pages -> Source: GitHub Actions.
 name: Publish site
 
@@ -31,6 +32,14 @@ jobs:
         run: |
           pip install --quiet jinja2 pyyaml
           python3 tests/homeassistant_test.py
+      - name: Check Business Quest (logic and marking job)
+        env:
+          BQ_BANK_KEY: ${{ secrets.BQ_BANK_KEY }}
+        run: |
+          node tests/business.test.mjs
+          (cd marker && npm ci --no-audit --no-fund)
+          if [ -n "$BQ_BANK_KEY" ]; then node tools/bank.mjs check; fi
+          node tests/marker.test.mjs
       - name: Build
         run: node build.mjs
       - uses: actions/upload-pages-artifact@v3

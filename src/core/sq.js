@@ -10,6 +10,10 @@
 
   const SQ = (root.SQ = root.SQ || {});
   SQ.version = '1.0.0';
+  // Which app this page is: 'studyquest' (maths) or another site built on the
+  // same core. It names the localStorage keys, so two apps on one domain
+  // never read each other's data. Set window.SQ_APP_ID before this file.
+  SQ.appId = root.SQ_APP_ID || SQ.appId || 'studyquest';
 
   const subjects = [];
   const subjectById = {};
