@@ -171,7 +171,13 @@ export function makeClient(apiKey, cfg) {
 
 function describe(e) {
   if (e instanceof Anthropic.APIConnectionError) return 'network: ' + (e.message || 'no connection');
-  if (e instanceof Anthropic.APIError) return `API ${e.status || ''} ${e.error && e.error.error ? e.error.error.type : ''}`.trim();
+  if (e instanceof Anthropic.APIError) {
+    const err = e.error && e.error.error ? e.error.error : {};
+    // The API's own message says what was wrong with the request; it never
+    // contains the student's answer, so it can go into the (public) log.
+    const msg = String(err.message || '').replace(/\s+/g, ' ').slice(0, 300);
+    return `API ${e.status || ''} ${err.type || ''}${msg ? ': ' + msg : ''}`.trim();
+  }
   return String(e && e.message ? e.message : e).slice(0, 200);
 }
 
@@ -189,22 +195,33 @@ export async function markAnswer(client, cfg, q, text) {
   };
   if (cfg.effort) params.output_config = { effort: cfg.effort };
   let calls = 0;
+  let fallbacks = cfg.fallbacks || null;
+  const notes = [];
   for (let i = 0; i < 2; i++) {
     let res;
     try {
       calls++;
-      res = cfg.fallbacks
-        ? await client.beta.messages.create({ ...params, betas: ['server-side-fallback-2026-07-01'], fallbacks: cfg.fallbacks })
+      res = fallbacks
+        ? await client.beta.messages.create({ ...params, betas: ['server-side-fallback-2026-07-01'], fallbacks })
         : await client.messages.create(params);
     } catch (e) {
-      return { ok: false, kind: 'api', error: describe(e), status: e && e.status, calls };
+      // The refusal fallback is an extra; if the API rejects the request
+      // because of it (a 400 that names it), ask again plainly. Other 400s
+      // (e.g. "credit balance is too low") are not retried.
+      if (fallbacks && e instanceof Anthropic.BadRequestError && /fallback/i.test(describe(e))) {
+        notes.push('without fallbacks after: ' + describe(e));
+        fallbacks = null;
+        i--;
+        continue;
+      }
+      return { ok: false, kind: 'api', error: describe(e), status: e && e.status, calls, notes };
     }
     if (res.stop_reason === 'refusal') continue;
     const reply = (res.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n');
     const mark = cleanMark(parseJson(reply), q, text, res.model || cfg.model);
-    if (mark) return { ok: true, mark, calls };
+    if (mark) return { ok: true, mark, calls, notes };
   }
-  return { ok: false, kind: 'invalid', error: 'the reply was not a valid mark', calls };
+  return { ok: false, kind: 'invalid', error: 'the reply was not a valid mark', calls, notes };
 }
 
 /* ---------- Firestore (REST, same document and rules as the site) ---------- */
@@ -330,6 +347,7 @@ export async function drain(opts) {
         });
         if (!claimed) { out.skipped++; continue; }
         const res = await markAnswer(client, cfg, q, item.text);
+        (res.notes || []).forEach((n) => log(`  Q${q.n}: ${n}`));
         const at = Date.now();
         await update(db, code, (s) => {
           const { c, a } = findAttempt(s, child.id, item.id);
@@ -373,3 +391,68 @@ async function note(db, code, childId, text) {
   });
 }
 
+
+/* ---------- marking without the API (by a Claude Code session) ---------- */
+
+/**
+ * Answers waiting for marking, with the same examiner prompt the API job
+ * would send. For a trusted local reader only: the result holds the
+ * markscheme and the student's text, so it must never go into a log.
+ * -> [{ family, childId, id, n, marks, ct, attempt, words, leased, system, user }]
+ */
+export async function listPending(db, codes, bank) {
+  const { SQ } = loadCore();
+  const byN = new Map(bank.map((q) => [q.n, q]));
+  const out = [];
+  for (const [fi, code] of codes.entries()) {
+    const doc = await db.get(code);
+    if (!doc) continue;
+    const state = SQ.storage.normalise(doc.state);
+    for (const c of state.children.filter((x) => !x.deletedAt)) {
+      for (const a of c.attempts.filter((x) => x.status === 'pending').sort((x, y) => x.ts - y.ts)) {
+        const q = byN.get(a.n);
+        if (!q) continue;
+        const p = buildPrompt(q, a.text);
+        out.push({ family: fi + 1, childId: c.id, id: a.id, n: a.n, marks: q.marks, ct: q.ct, attempt: a.attempt,
+          words: a.words, leased: a.lease > Date.now(), system: p.system, user: p.user });
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Store a mark given in the model's JSON shape (the same checks as the API
+ * path: cleanMark, too-short cap, injection flag). Skips an answer that is
+ * already marked or claimed by a running job.
+ * -> { ok: true, mark } | { ok: false, why }
+ */
+export async function submitMark(db, codes, bank, id, raw, model) {
+  const byN = new Map(bank.map((q) => [q.n, q]));
+  for (const code of codes) {
+    let result = null;
+    await update(db, code, (s) => {
+      for (const c of s.children) {
+        const a = c.attempts.find((x) => x.id === id);
+        if (!a) continue;
+        const now = Date.now();
+        if (a.status !== 'pending') { result = { ok: false, why: 'already marked' }; return false; }
+        if (a.lease > now) { result = { ok: false, why: 'being marked by a job right now' }; return false; }
+        const q = byN.get(a.n);
+        const mark = q && cleanMark(raw, q, a.text, model);
+        if (!mark) { result = { ok: false, why: 'the mark is not valid' }; return false; }
+        a.status = 'marked';
+        a.mark = mark;
+        a.lease = 0;
+        a.updatedAt = now;
+        c.reveal[String(q.n)] = { ms: q.ms, notes: q.notes || [], at: now };
+        c.marker = Object.assign({}, c.marker, { lastRun: now, lastError: '', updatedAt: now });
+        result = { ok: true, mark, n: q.n };
+        return true;
+      }
+      return false;
+    });
+    if (result) return result;
+  }
+  return { ok: false, why: 'no such answer' };
+}

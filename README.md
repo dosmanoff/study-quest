@@ -164,6 +164,20 @@ dist/pages/         для GitHub Pages и других хостингов бе�
 
 Firestore тот же, что у Study Quest (`study-quest-1b14b`), правила менять не нужно. Состояние семьи помещается в один документ: старые попытки при приближении к лимиту 900 КБ сохраняют только свой балл.
 
+### Проверка без API: облачная сессия Claude Code
+
+Если на аккаунте API нет денег, проверяет облачная сессия Claude Code. В `marker/config.json` для этого стоит `"apiMarking": false`: задание на GitHub тогда ничего не делает, а в `src/subjects/business/config.js` стоит `marking: 'session'`, поэтому сайт и панель родителя говорят «about once an hour» и не показывают кнопку «Mark now».
+
+Сессия раз в час (по своему расписанию) делает:
+
+```bash
+BQ_FAMILY_CODES=... node marker/manual.mjs pending > /tmp/pending.json   # ответы + тот же промпт проверяющего
+# сессия ставит оценки по промпту и пишет marks.json: [{"id": "...", "mark": {JSON как от модели}}]
+BQ_FAMILY_CODES=... node marker/manual.mjs submit marks.json             # cleanMark, лимит по длине, флаги, lease
+```
+
+`pending` печатает mark scheme и ответы, поэтому запускать его можно только там, где вывод никто не видит; в GitHub Actions — нельзя. Чтобы вернуться к проверке через API, поставьте `"apiMarking": true` и `marking: 'api'`.
+
 ### Надёжное расписание (Home Assistant)
 
 Расписание GitHub ненадёжно: в первые сутки задание из `mark.yml` запустилось по расписанию два раза за 11 часов вместо 66, потому что при нагрузке GitHub пропускает такие запуски. Поэтому задание проверки лучше запускать снаружи. У нас это делает Home Assistant, который и так работает круглосуточно:

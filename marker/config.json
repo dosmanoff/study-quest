@@ -1,5 +1,7 @@
 {
   "_comment": "Business Quest marking job. Secrets (API key, bank key, family codes) are GitHub secrets, never here. See README.",
+  "apiMarking": false,
+  "_apiMarking": "false = the GitHub job does not call the API; answers are marked by a Claude Code session (marker/manual.mjs). Set true when the API account has credit.",
   "model": "claude-sonnet-5-5",
   "fallbacks": "default",
   "effort": null,

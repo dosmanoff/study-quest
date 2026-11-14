@@ -179,7 +179,9 @@ await phone.waitForSelector('.tiles');
 await phone.evaluate(() => window.SQ.sync.pull());
 await phone.waitForFunction(() => /not set up/.test(document.body.textContent));
 assert.match(await phone.textContent('.tiles'), /Waiting for marking\s*1/);
-assert.ok(await phone.isVisible('a.btn[href*="actions/workflows/mark.yml"]'), 'Mark now button');
+// marking: 'session' (src/subjects/business/config.js): no GitHub button, the panel says who marks
+assert.equal(await phone.locator('a.btn[href*="actions/workflows/mark.yml"]').count(), 0, 'no Mark now button in session mode');
+assert.match(await phone.textContent('.tab-body'), /Claude Code session that checks the queue/);
 await noSideScroll(phone, 'parent progress');
 await shot(phone, '10-parent-pending');
 
