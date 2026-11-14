@@ -231,6 +231,21 @@ reply = () => ({ text: markJson(1) });
 r = await run({ only: two[1].id });
 eq([att(two[0].id).status, att(two[1].id).status], ['pending', 'marked'], 'just that one');
 
+step('the public Actions log shows no family code, name or answer text');
+const secretText = 'My secret answer about limited liability and the owners of a company.';
+const logLines = [];
+family([pending(20, secretText + ' ' + long), pending(21, long)]);
+reply = (b, n) => (n % 2 ? { text: markJson(1, { flags: ['instructions_in_answer'] }) } : { status: 429, headers: { 'retry-after': '0' } });
+claude.requests.length = 0;
+await run({ log: (m) => logLines.push(m) });
+await drain({ codes: [CODE, 'ZZZZ-ZZZZ-ZZZZ'], bank, cfg, apiKey: '', log: (m) => logLines.push(m) });
+const logText = logLines.join('\n');
+ok(logLines.length >= 3, 'something was logged: ' + logText);
+for (const bad of [CODE, CODE.slice(0, 4), 'ZZZZ', 'Yaroslav', 'secret answer', ID.slice(0, 12)]) {
+  ok(!logText.includes(bad), `log does not contain "${bad}"`);
+}
+ok(/family 1: 2 waiting/.test(logText) && /Q20: 1\/\d/.test(logText) && /family 2: no such family/.test(logText), 'log keeps what is useful');
+
 await fs.close();
 await claude.close();
 console.log(`\nOK: marking job, ${checks} checks (cleanMark, prompt, success, 429, 500, bad JSON, refusal, prompt injection, no key, budget, lease, concurrent saves).`);

@@ -289,10 +289,13 @@ export async function drain(opts) {
   const client = opts.client || (opts.apiKey ? makeClient(opts.apiKey, cfg) : null);
   const leaseMs = (cfg.leaseMinutes || 10) * 60000;
 
-  for (const code of opts.codes) {
+  // The repository is public, and so are the Actions logs: they never show a
+  // family code, a name or answer text, only "family 1", question numbers and marks.
+  for (const [fi, code] of opts.codes.entries()) {
+    const fam = `family ${fi + 1}`;
     let doc;
-    try { doc = await db.get(code); } catch (e) { log(`${mask(code)}: ${e.message}`); out.stopped = 'firestore'; continue; }
-    if (!doc) { log(`${mask(code)}: no such family`); continue; }
+    try { doc = await db.get(code); } catch (e) { log(`${fam}: ${e.message}`); out.stopped = 'firestore'; continue; }
+    if (!doc) { log(`${fam}: no such family (check BQ_FAMILY_CODES)`); continue; }
     const { SQ } = loadCore();
     const state = SQ.storage.normalise(doc.state);
     for (const child of state.children.filter((c) => !c.deletedAt)) {
@@ -300,7 +303,7 @@ export async function drain(opts) {
         .filter((a) => a.status === 'pending' && a.tries < (cfg.maxTries || 3) && (!opts.only || a.id === opts.only))
         .sort((a, b) => a.ts - b.ts);
       if (!queue.length) continue;
-      log(`${mask(code)}/${child.settings.childName || child.id}: ${queue.length} waiting`);
+      log(`${fam}: ${queue.length} waiting`);
       if (!client) {
         out.stopped = 'no-key';
         await note(db, code, child.id, 'Marking is not set up yet (no API key).');
@@ -370,5 +373,3 @@ async function note(db, code, childId, text) {
   });
 }
 
-/** Family codes never go into logs in full. */
-export function mask(code) { return String(code).slice(0, 4) + '-…'; }

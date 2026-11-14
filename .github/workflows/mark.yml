@@ -10,8 +10,12 @@
 name: Mark Business Quest answers
 
 on:
+  # GitHub runs scheduled jobs late or skips them when busy, most of all at the
+  # start of an hour (observed 2026-11-14: 2 runs in 11 hours with */10).
+  # Odd minutes help a little; the reliable way is an outside trigger every
+  # 10 minutes, e.g. Home Assistant (marker/homeassistant/, see README).
   schedule:
-    - cron: '*/10 * * * *'
+    - cron: '7,17,27,37,47,57 * * * *'
   workflow_dispatch:
     inputs:
       only:

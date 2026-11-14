@@ -1,0 +1,44 @@
+# Business Quest: start the marking job on GitHub every 10 minutes.
+#
+# GitHub's own schedule for .github/workflows/mark.yml runs late or not at all
+# when GitHub is busy, so Home Assistant (which runs all the time anyway) asks
+# GitHub to run it. Every request starts one short job (about 15 seconds);
+# when nothing is waiting it does nothing.
+#
+# Setup (README, "Business Quest" -> "Reliable schedule"):
+# 1. GitHub -> Settings -> Developer settings -> Fine-grained tokens -> Generate:
+#    repository access: Only dosmanoff/study-quest; permissions: Actions: Read and write.
+# 2. In /config/secrets.yaml add (with the word Bearer and a space):
+#      github_business_quest: "Bearer github_pat_..."
+# 3. Save this file as /config/packages/business_quest_marking.yaml,
+#    check the configuration and reload/restart.
+# The token can only start or read Actions runs of this one repository.
+
+rest_command:
+  business_quest_mark:
+    url: "https://api.github.com/repos/dosmanoff/study-quest/actions/workflows/mark.yml/dispatches"
+    method: POST
+    headers:
+      Authorization: !secret github_business_quest
+      Accept: "application/vnd.github+json"
+      X-GitHub-Api-Version: "2022-11-28"
+      User-Agent: "home-assistant-business-quest"
+    content_type: "application/json"
+    payload: '{"ref": "main"}'
+    timeout: 20
+
+automation:
+  - id: business_quest_mark_every_10_minutes
+    alias: "Business Quest: run the marking job"
+    description: "Starts the GitHub job that marks Yaroslav's written answers."
+    mode: single
+    triggers:
+      - trigger: time_pattern
+        minutes: "/10"
+    conditions:
+      # Nobody writes answers at night; the first run in the morning catches up.
+      - condition: time
+        after: "07:00:00"
+        before: "23:59:00"
+    actions:
+      - action: rest_command.business_quest_mark
