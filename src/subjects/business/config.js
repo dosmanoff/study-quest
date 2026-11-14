@@ -8,6 +8,9 @@
   BQ.config = {
     // Where a parent starts the marking job by hand ("Mark now").
     markNowUrl: 'https://github.com/dosmanoff/study-quest/actions/workflows/mark.yml',
+    // Who marks written answers: 'session' = a Claude Code session checks the
+    // queue about once an hour (no API credit needed); 'api' = the GitHub job.
+    marking: 'session',
     // How often the open page checks for new marks while answers are waiting.
     pollPendingMs: 30000,
   };

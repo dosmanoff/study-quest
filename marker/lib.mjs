@@ -391,3 +391,68 @@ async function note(db, code, childId, text) {
   });
 }
 
+
+/* ---------- marking without the API (by a Claude Code session) ---------- */
+
+/**
+ * Answers waiting for marking, with the same examiner prompt the API job
+ * would send. For a trusted local reader only: the result holds the
+ * markscheme and the student's text, so it must never go into a log.
+ * -> [{ family, childId, id, n, marks, ct, attempt, words, leased, system, user }]
+ */
+export async function listPending(db, codes, bank) {
+  const { SQ } = loadCore();
+  const byN = new Map(bank.map((q) => [q.n, q]));
+  const out = [];
+  for (const [fi, code] of codes.entries()) {
+    const doc = await db.get(code);
+    if (!doc) continue;
+    const state = SQ.storage.normalise(doc.state);
+    for (const c of state.children.filter((x) => !x.deletedAt)) {
+      for (const a of c.attempts.filter((x) => x.status === 'pending').sort((x, y) => x.ts - y.ts)) {
+        const q = byN.get(a.n);
+        if (!q) continue;
+        const p = buildPrompt(q, a.text);
+        out.push({ family: fi + 1, childId: c.id, id: a.id, n: a.n, marks: q.marks, ct: q.ct, attempt: a.attempt,
+          words: a.words, leased: a.lease > Date.now(), system: p.system, user: p.user });
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Store a mark given in the model's JSON shape (the same checks as the API
+ * path: cleanMark, too-short cap, injection flag). Skips an answer that is
+ * already marked or claimed by a running job.
+ * -> { ok: true, mark } | { ok: false, why }
+ */
+export async function submitMark(db, codes, bank, id, raw, model) {
+  const byN = new Map(bank.map((q) => [q.n, q]));
+  for (const code of codes) {
+    let result = null;
+    await update(db, code, (s) => {
+      for (const c of s.children) {
+        const a = c.attempts.find((x) => x.id === id);
+        if (!a) continue;
+        const now = Date.now();
+        if (a.status !== 'pending') { result = { ok: false, why: 'already marked' }; return false; }
+        if (a.lease > now) { result = { ok: false, why: 'being marked by a job right now' }; return false; }
+        const q = byN.get(a.n);
+        const mark = q && cleanMark(raw, q, a.text, model);
+        if (!mark) { result = { ok: false, why: 'the mark is not valid' }; return false; }
+        a.status = 'marked';
+        a.mark = mark;
+        a.lease = 0;
+        a.updatedAt = now;
+        c.reveal[String(q.n)] = { ms: q.ms, notes: q.notes || [], at: now };
+        c.marker = Object.assign({}, c.marker, { lastRun: now, lastError: '', updatedAt: now });
+        result = { ok: true, mark, n: q.n };
+        return true;
+      }
+      return false;
+    });
+    if (result) return result;
+  }
+  return { ok: false, why: 'no such answer' };
+}

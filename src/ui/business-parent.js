@@ -201,10 +201,14 @@
           '<button class="btn small ghost" data-act="review" data-id="' + esc(a.id) + '" data-from="parent">Open</button></li>';
       }).join('') + '</ul>'
       : '<p class="muted">Nothing is waiting. Every answer has been marked.</p>';
+    const session = BQ.config && BQ.config.marking === 'session';
     return '<section class="p-sec"><h2>Waiting for marking</h2>' +
-      '<p class="muted small">Answers are marked by Claude against the markscheme by a GitHub job (started every 10 minutes by Home Assistant, or by GitHub’s own schedule, which can lag by hours). Until then they don’t count anywhere, and the student can’t see the model answer.</p>' +
+      '<p class="muted small">' + (session
+        ? 'Answers are marked by Claude against the markscheme in a Claude Code session that checks the queue about once an hour. To get one marked sooner, ask that session to mark now.'
+        : 'Answers are marked by Claude against the markscheme by a GitHub job (started every 10 minutes by Home Assistant, or by GitHub’s own schedule, which can lag by hours).') +
+      ' Until then they don’t count anywhere, and the student can’t see the model answer.</p>' +
       list + status +
-      (s.pending.length && url ? '<div class="btn-row"><a class="btn primary" href="' + esc(url) + '" target="_blank" rel="noopener">Mark now</a>' +
+      (s.pending.length && url && !session ? '<div class="btn-row"><a class="btn primary" href="' + esc(url) + '" target="_blank" rel="noopener">Mark now</a>' +
         '<span class="muted small">Opens GitHub: press “Run workflow”. The marks arrive here within a minute or two.</span></div>' : '') +
       '</section>';
   }

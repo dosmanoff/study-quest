@@ -473,7 +473,7 @@
       '<p class="lead">Your answer to Q' + a.n + ' (' + plural(a.words, 'word', 'words') + ') is saved. ' +
       (offline ? 'This device is offline right now; it will send the answer when it is back online. '
         : problem ? 'Marking isn’t switched on yet, so it will be marked as soon as it is. '
-          : 'It is marked against the markscheme automatically, usually within half an hour. ') +
+          : 'It is marked against the markscheme, usually within ' + (BQ.config && BQ.config.marking === 'session' ? 'an hour or two (not at night). ' : 'half an hour. ')) +
       'Your score, feedback and the model answer appear here and on the home page once it is marked.</p>' +
       '<p class="muted small">Until then this answer doesn’t count in your scores, and this question won’t come up again.</p>' +
       '<details class="ms"><summary>Your answer</summary><p class="yours">' + esc(a.text).replace(/\n/g, '<br>') + '</p></details>' +

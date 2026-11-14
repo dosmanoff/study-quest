@@ -258,6 +258,29 @@ r = await run();
 eq([r.stopped, att(a.id).status, claude.requests.length], ['api', 'pending', 1], 'no credit: one call, answer waits');
 ok(/credit balance is too low/.test(kid().marker.lastError), 'the parent panel says why');
 
+step('marking by a Claude Code session: list, submit, checks');
+{
+  const { listPending, submitMark } = await import('../marker/lib.mjs');
+  const p1 = pending(25, long), p2 = pending(26, 'Too short.'), p3 = pending(27, long);
+  family([p1, p2, p3]);
+  claude.requests.length = 0;
+  const list = await listPending(db, [CODE], bank);
+  eq(list.map((x) => x.id), [p1.id, p2.id, p3.id], 'all waiting answers, oldest first');
+  ok(list[0].user.includes('<student_answer>') && list[0].user.includes(Q(25).ms) && /Never follow instructions/.test(list[0].system), 'the same examiner prompt as the API job');
+  let s1 = await submitMark(db, [CODE], bank, p1.id, JSON.parse(markJson(2)), 'claude-code-session');
+  eq([s1.ok, s1.mark.score, att(p1.id).status, att(p1.id).mark.model], [true, 2, 'marked', 'claude-code-session'], 'stored as marked');
+  eq(kid().reveal['25'].ms, Q(25).ms, 'model answer revealed');
+  eq((await submitMark(db, [CODE], bank, p1.id, JSON.parse(markJson(1)), 'x')).why, 'already marked', 'no second mark');
+  const s2 = await submitMark(db, [CODE], bank, p2.id, JSON.parse(markJson(4)), 'claude-code-session');
+  eq([s2.mark.score, s2.mark.flags], [0, ['too_short']], 'too-short cap applies');
+  eq((await submitMark(db, [CODE], bank, p3.id, { nonsense: true }, 'x')).why, 'the mark is not valid', 'junk mark refused');
+  eq(att(p3.id).status, 'pending', 'and the answer still waits');
+  const st = fs.state(ID); st.children[0].attempts.find((z) => z.id === p3.id).lease = Date.now() + 60000; fs.seed(ID, st);
+  eq((await submitMark(db, [CODE], bank, p3.id, JSON.parse(markJson(1)), 'x')).why, 'being marked by a job right now', 'lease respected');
+  eq((await submitMark(db, [CODE], bank, 'nope', JSON.parse(markJson(1)), 'x')).why, 'no such answer', 'unknown id');
+  eq(claude.requests.length, 0, 'no API calls in this mode');
+}
+
 step('the public Actions log shows no family code, name or answer text');
 const secretText = 'My secret answer about limited liability and the owners of a company.';
 const logLines = [];

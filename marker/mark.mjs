@@ -25,6 +25,10 @@ if (!codes.length) {
   console.log('No BQ_FAMILY_CODES: nothing to mark. Add the family code as a GitHub secret (see README).');
   process.exit(0);
 }
+if (cfg.apiMarking === false && !process.env.BQ_FORCE_API) {
+  console.log('API marking is off (marker/config.json "apiMarking": false): answers are marked by a Claude Code session with marker/manual.mjs.');
+  process.exit(0);
+}
 const bank = loadBank(); // throws without BQ_BANK_KEY
 const apiKey = process.env.ANTHROPIC_API_KEY || '';
 console.log(`Business Quest marking: model ${cfg.model}, daily limit ${cfg.dailyLimit}, ${codes.length} family code(s)${apiKey ? '' : ', NO API KEY'}`);
