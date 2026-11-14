@@ -231,6 +231,26 @@ reply = () => ({ text: markJson(1) });
 r = await run({ only: two[1].id });
 eq([att(two[0].id).status, att(two[1].id).status], ['pending', 'marked'], 'just that one');
 
+step('400 with the refusal fallback: asked again without it; the API message is logged');
+const bad400 = { status: 400, json: { type: 'error', error: { type: 'invalid_request_error', message: 'fallbacks: not supported here' } } };
+a = pending(22, long);
+family([a]);
+claude.requests.length = 0;
+reply = (b) => (b.fallbacks ? bad400 : { text: markJson(1) });
+let lines400 = [];
+r = await run({ log: (m) => lines400.push(m) });
+eq([r.marked, att(a.id).status, claude.requests.length], [1, 'marked', 2], 'marked on the second, plain request');
+ok(!('fallbacks' in claude.requests[1].body) && !claude.requests[1].headers['anthropic-beta'], 'the retry has no fallbacks and no beta header');
+ok(lines400.some((l) => /without fallbacks after: API 400 invalid_request_error: fallbacks: not supported here/.test(l)), 'the reason is in the log');
+a = pending(23, long);
+family([a]);
+claude.requests.length = 0;
+reply = () => bad400;
+lines400 = [];
+r = await run({ log: (m) => lines400.push(m) });
+eq([r.stopped, att(a.id).status, claude.requests.length], ['api', 'pending', 2], 'a 400 without fallbacks too: pending, run stops');
+ok(/API 400 invalid_request_error: fallbacks: not supported here/.test(kid().marker.lastError), 'message kept for the parent panel');
+
 step('the public Actions log shows no family code, name or answer text');
 const secretText = 'My secret answer about limited liability and the owners of a company.';
 const logLines = [];

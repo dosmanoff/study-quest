@@ -171,7 +171,13 @@ export function makeClient(apiKey, cfg) {
 
 function describe(e) {
   if (e instanceof Anthropic.APIConnectionError) return 'network: ' + (e.message || 'no connection');
-  if (e instanceof Anthropic.APIError) return `API ${e.status || ''} ${e.error && e.error.error ? e.error.error.type : ''}`.trim();
+  if (e instanceof Anthropic.APIError) {
+    const err = e.error && e.error.error ? e.error.error : {};
+    // The API's own message says what was wrong with the request; it never
+    // contains the student's answer, so it can go into the (public) log.
+    const msg = String(err.message || '').replace(/\s+/g, ' ').slice(0, 300);
+    return `API ${e.status || ''} ${err.type || ''}${msg ? ': ' + msg : ''}`.trim();
+  }
   return String(e && e.message ? e.message : e).slice(0, 200);
 }
 
@@ -189,22 +195,32 @@ export async function markAnswer(client, cfg, q, text) {
   };
   if (cfg.effort) params.output_config = { effort: cfg.effort };
   let calls = 0;
+  let fallbacks = cfg.fallbacks || null;
+  const notes = [];
   for (let i = 0; i < 2; i++) {
     let res;
     try {
       calls++;
-      res = cfg.fallbacks
-        ? await client.beta.messages.create({ ...params, betas: ['server-side-fallback-2026-07-01'], fallbacks: cfg.fallbacks })
+      res = fallbacks
+        ? await client.beta.messages.create({ ...params, betas: ['server-side-fallback-2026-07-01'], fallbacks })
         : await client.messages.create(params);
     } catch (e) {
-      return { ok: false, kind: 'api', error: describe(e), status: e && e.status, calls };
+      // The refusal fallback is an extra; if the API rejects the request with
+      // it (400), ask again plainly instead of leaving the answer waiting.
+      if (fallbacks && e instanceof Anthropic.BadRequestError) {
+        notes.push('without fallbacks after: ' + describe(e));
+        fallbacks = null;
+        i--;
+        continue;
+      }
+      return { ok: false, kind: 'api', error: describe(e), status: e && e.status, calls, notes };
     }
     if (res.stop_reason === 'refusal') continue;
     const reply = (res.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n');
     const mark = cleanMark(parseJson(reply), q, text, res.model || cfg.model);
-    if (mark) return { ok: true, mark, calls };
+    if (mark) return { ok: true, mark, calls, notes };
   }
-  return { ok: false, kind: 'invalid', error: 'the reply was not a valid mark', calls };
+  return { ok: false, kind: 'invalid', error: 'the reply was not a valid mark', calls, notes };
 }
 
 /* ---------- Firestore (REST, same document and rules as the site) ---------- */
@@ -330,6 +346,7 @@ export async function drain(opts) {
         });
         if (!claimed) { out.skipped++; continue; }
         const res = await markAnswer(client, cfg, q, item.text);
+        (res.notes || []).forEach((n) => log(`  Q${q.n}: ${n}`));
         const at = Date.now();
         await update(db, code, (s) => {
           const { c, a } = findAttempt(s, child.id, item.id);
