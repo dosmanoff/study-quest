@@ -202,7 +202,7 @@
       }).join('') + '</ul>'
       : '<p class="muted">Nothing is waiting. Every answer has been marked.</p>';
     return '<section class="p-sec"><h2>Waiting for marking</h2>' +
-      '<p class="muted small">Answers are marked by Claude against the markscheme by a job that runs every 10 minutes. Until then they don’t count anywhere, and the student can’t see the model answer.</p>' +
+      '<p class="muted small">Answers are marked by Claude against the markscheme by a GitHub job (started every 10 minutes by Home Assistant, or by GitHub’s own schedule, which can lag by hours). Until then they don’t count anywhere, and the student can’t see the model answer.</p>' +
       list + status +
       (s.pending.length && url ? '<div class="btn-row"><a class="btn primary" href="' + esc(url) + '" target="_blank" rel="noopener">Mark now</a>' +
         '<span class="muted small">Opens GitHub: press “Run workflow”. The marks arrive here within a minute or two.</span></div>' : '') +
@@ -315,7 +315,7 @@
       '<p class="muted">Open this link on every device that should share the progress (the student’s phone, computer, your phone):</p>' +
       '<div class="copy-row"><input id="join-link" class="link-input" readonly value="' + esc(joinLink(code)) + '"><button class="btn" data-act="copy-link">Copy link</button></div>' +
       '<p class="muted small">Sync: ' + esc(SQ.sync.status) + (SQ.sync.lastSync ? ' · last ' + ui.when(SQ.sync.lastSync) : '') + '</p></section>' +
-      '<section class="p-sec"><h2>Marking</h2><p>Written answers are marked by a GitHub Actions job (every 10 minutes). It needs these repository secrets: ' +
+      '<section class="p-sec"><h2>Marking</h2><p>Written answers are marked by a GitHub Actions job, started every 10 minutes from Home Assistant (GitHub’s own schedule alone can lag by hours). It needs these repository secrets: ' +
       '<code>ANTHROPIC_API_KEY</code>, <code>BQ_BANK_KEY</code> and <code>BQ_FAMILY_CODES</code> = this family code. See the README, section “Business Quest”.</p></section>' +
       '<section class="p-sec"><h2>Stop syncing on this device</h2><button class="btn danger" data-act="sync-leave">Disconnect this device</button>' +
       '<p class="muted small">The data on this device stays. Other devices are not affected.</p></section>';

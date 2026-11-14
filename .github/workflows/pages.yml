@@ -37,6 +37,7 @@ jobs:
           BQ_BANK_KEY: ${{ secrets.BQ_BANK_KEY }}
         run: |
           node tests/business.test.mjs
+          python3 tests/business_ha_test.py
           (cd marker && npm ci --no-audit --no-fund)
           if [ -n "$BQ_BANK_KEY" ]; then node tools/bank.mjs check; fi
           node tests/marker.test.mjs
