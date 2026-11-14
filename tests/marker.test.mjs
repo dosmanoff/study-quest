@@ -250,6 +250,13 @@ lines400 = [];
 r = await run({ log: (m) => lines400.push(m) });
 eq([r.stopped, att(a.id).status, claude.requests.length], ['api', 'pending', 2], 'a 400 without fallbacks too: pending, run stops');
 ok(/API 400 invalid_request_error: fallbacks: not supported here/.test(kid().marker.lastError), 'message kept for the parent panel');
+a = pending(24, long);
+family([a]);
+claude.requests.length = 0;
+reply = () => ({ status: 400, json: { type: 'error', error: { type: 'invalid_request_error', message: 'Your credit balance is too low to access the Anthropic API.' } } });
+r = await run();
+eq([r.stopped, att(a.id).status, claude.requests.length], ['api', 'pending', 1], 'no credit: one call, answer waits');
+ok(/credit balance is too low/.test(kid().marker.lastError), 'the parent panel says why');
 
 step('the public Actions log shows no family code, name or answer text');
 const secretText = 'My secret answer about limited liability and the owners of a company.';

@@ -205,9 +205,10 @@ export async function markAnswer(client, cfg, q, text) {
         ? await client.beta.messages.create({ ...params, betas: ['server-side-fallback-2026-07-01'], fallbacks })
         : await client.messages.create(params);
     } catch (e) {
-      // The refusal fallback is an extra; if the API rejects the request with
-      // it (400), ask again plainly instead of leaving the answer waiting.
-      if (fallbacks && e instanceof Anthropic.BadRequestError) {
+      // The refusal fallback is an extra; if the API rejects the request
+      // because of it (a 400 that names it), ask again plainly. Other 400s
+      // (e.g. "credit balance is too low") are not retried.
+      if (fallbacks && e instanceof Anthropic.BadRequestError && /fallback/i.test(describe(e))) {
         notes.push('without fallbacks after: ' + describe(e));
         fallbacks = null;
         i--;
